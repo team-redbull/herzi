@@ -1,0 +1,33 @@
+# Part 2, Config example, with concrete endpoints and required queue settings.
+interval: 120s
+reconcileTimeout: 60s
+hubName: ocp4-bat-yam-01
+agentNamespace: inventory
+installURL: https://workflows-api.example.com/workflows/server-lifecycle/install-server
+maxSlots: 100
+ambiguousWait: 5m
+stuckAfter: 2h
+# Queue names are deployment-specific; these are illustrative, not defaults.
+temporalAddress: temporal.example.com:7233
+temporalNamespace: default
+activityQueue: server-lifecycle-activity-ocp4-bat-yam-01
+workflowQueue: install-server-workflow
+segmentQueue: segment-lifecycle-activity
+
+defaults:
+  lowPct: 15
+  highPct: 30
+  minFree: 2
+  minBand: 1
+  maxOpenRunsPerPool: 15
+  probeInterval: 20m
+  drawGrace: 2m
+  failureMemory: 6h
+  settlingMax: 60m
+  dryRunGrow: false
+  paused: false
+
+pools:
+  "32-128-zone-1": { minFree: 5, maxOpenRunsPerPool: 8 }
+  "16-64-zone-2": { paused: true }
+  "8-32-zone-1": { lowPct: 25, dryRunGrow: true }

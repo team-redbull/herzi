@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: agent-install.openshift.io/v1beta1
+    kind: Agent
+    metadata:
+      name: ready
+      namespace: inventory
+      creationTimestamp: '2026-10-26T08:00:00Z'
+      labels: {infraenvs.agent-install.openshift.io: pool-a}
+      managedFields: [{manager: assisted-service}]
+    spec:
+      approved: true
+      ignitionEndpoint: {url: 'https://ignition.example', token: huge}
+      ignitionConfigOverrides: '{"ignition": {"version": "3.2.0"}}'
+    status:
+      inventory: '{"interfaces": [], "disks": []}'
+      debugInfo: {state: known-unbound}
+      conditions:
+        - {type: Connected, status: 'True', lastTransitionTime: '2026-10-26T08:10:00Z'}
+        - {type: Validated, status: 'True', lastTransitionTime: '2026-10-26T08:20:00Z'}
+  - apiVersion: agent-install.openshift.io/v1beta1
+    kind: Agent
+    metadata: {name: bound, namespace: inventory}
+    spec:
+      approved: true
+      clusterDeploymentName: {name: tenant, namespace: clusters}
+    status: {debugInfo: {state: installed}}
+  - apiVersion: agent-install.openshift.io/v1beta1
+    kind: Agent
+    metadata:
+      name: stale
+      namespace: inventory
+      labels: {infraenvs.agent-install.openshift.io: pool-a, agentMachineRef: old-machine}
+      creationTimestamp: '2026-10-26T08:00:00Z'
+    spec: {approved: true}
+    status: {debugInfo: {state: known-unbound}}
+  - apiVersion: agent-install.openshift.io/v1beta1
+    kind: Agent
+    metadata:
+      name: deleting
+      namespace: inventory
+      deletionTimestamp: '2026-10-26T08:30:00Z'
+      finalizers: [agent.agent-install.openshift.io/cleanup]

@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: hypershift.openshift.io/v1beta1
+    kind: NodePool
+    metadata: {name: replicas, namespace: clusters}
+    spec:
+      replicas: 4
+      platform:
+        type: Agent
+        agent:
+          agentLabelSelector:
+            matchLabels: {infraenvs.agent-install.openshift.io: pool-a}
+            matchExpressions: [{key: extra, operator: Exists}]
+  - apiVersion: hypershift.openshift.io/v1beta1
+    kind: NodePool
+    metadata: {name: autoscaling, namespace: clusters}
+    spec:
+      autoScaling: {min: 1, max: 10}
+      platform: {type: Agent}
+  - apiVersion: hypershift.openshift.io/v1beta1
+    kind: NodePool
+    metadata: {name: paused, namespace: clusters}
+    spec: {pausedUntil: 'true'}
+  - apiVersion: hypershift.openshift.io/v1beta1
+    kind: NodePool
+    metadata: {name: future, namespace: clusters}
+    spec: {pausedUntil: '2026-10-27T00:00:00Z'}
+  - apiVersion: hypershift.openshift.io/v1beta1
+    kind: NodePool
+    metadata: {name: past, namespace: clusters}
+    spec: {pausedUntil: '2026-10-25T00:00:00Z'}
+  - apiVersion: hypershift.openshift.io/v1beta1
+    kind: NodePool
+    metadata: {name: "false", namespace: clusters}
+    spec: {pausedUntil: 'false'}
+  - apiVersion: hypershift.openshift.io/v1beta1
+    kind: NodePool
+    metadata:
+      name: deleting
+      namespace: clusters
+      deletionTimestamp: '2026-10-26T08:00:00Z'
+      finalizers: [hypershift.openshift.io/finalizer]
+    spec: {replicas: 0, platform: {type: Agent}}

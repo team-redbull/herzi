@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: agent-install.openshift.io/v1beta1
+    kind: InfraEnv
+    metadata:
+      name: early
+      namespace: inventory
+      annotations: {herzi.redbull.io/paused: 'true', herzi.redbull.io/blocked-until: '2026-10-26T09:00:00Z'}
+    spec: {clusterRef: {name: tenant, namespace: clusters}}
+  - apiVersion: agent-install.openshift.io/v1beta1
+    kind: InfraEnv
+    metadata:
+      name: deleting
+      namespace: inventory
+      deletionTimestamp: '2026-10-26T08:00:00Z'
+      finalizers: [infraenv.agent-install.openshift.io/cleanup]
