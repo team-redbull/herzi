@@ -136,6 +136,9 @@ func Load(data []byte) (Config, error) {
 	if c.HubName != "" && !strings.HasPrefix(c.HubName, "ocp4-") {
 		c.HubName = "ocp4-" + c.HubName
 	}
+	if c.ActivityQueue == "" && c.HubName != "" {
+		c.ActivityQueue = activityQueuePrefix + c.HubName
+	}
 	o, err := input.Defaults.convert("defaults")
 	if err != nil {
 		problems = append(problems, err)

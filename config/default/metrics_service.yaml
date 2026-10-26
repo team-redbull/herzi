@@ -1,18 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  labels:
-    control-plane: controller-manager
+  name: herzi-metrics
+  labels: &id001
     app.kubernetes.io/name: herzi
-    app.kubernetes.io/managed-by: kustomize
-  name: controller-manager-metrics-service
-  namespace: system
 spec:
+  selector: *id001
   ports:
   - name: https
     port: 8443
+    targetPort: https
     protocol: TCP
-    targetPort: 8443
-  selector:
-    control-plane: controller-manager
-    app.kubernetes.io/name: herzi

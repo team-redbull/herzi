@@ -8,11 +8,22 @@ func Defaults() PoolConfig {
 		ProbeInterval: 20 * time.Minute, DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour}
 }
 
-// DefaultHub supplies Part 2, Config's hub-wide timing and slot defaults.
-// Identity, endpoint, and queue names must be supplied by the operator.
+// Queue names fixed by the workflows repo (shared/consts.py). They are defaults so a hub cannot ship a
+// misspelt one: a queue nobody polls reads as "zero pollers" and would block every pool.
+const (
+	DefaultWorkflowQueue        = "install-server-workflow"
+	DefaultSegmentQueue         = "segment-lifecycle-activity"
+	activityQueuePrefix         = "server-lifecycle-activity-"
+	DefaultTemporalNamespaceVal = "default"
+)
+
+// DefaultHub supplies Part 2, Config's hub-wide timing, slot and queue defaults.
+// The hub name, install URL and Temporal address must be supplied by the operator. The activity queue
+// is derived from the hub name (server-lifecycle-activity-<mce>) when it is not written.
 func DefaultHub() HubConfig {
 	return HubConfig{Interval: 2 * time.Minute, ReconcileTimeout: time.Minute, AgentNamespace: "inventory",
-		MaxSlots: 100, AmbiguousWait: 5 * time.Minute, StuckAfter: 2 * time.Hour}
+		MaxSlots: 100, AmbiguousWait: 5 * time.Minute, StuckAfter: 2 * time.Hour,
+		TemporalNamespace: DefaultTemporalNamespaceVal, WorkflowQueue: DefaultWorkflowQueue, SegmentQueue: DefaultSegmentQueue}
 }
 
 // Manages implements Part 2, Config: "A pool that is not listed is not managed".

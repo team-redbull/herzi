@@ -1,0 +1,31 @@
+# Design Part 2, Config: "Hub settings ... cannot differ per pool."
+# Example endpoints/queues must be replaced for the target hub. No credentials belong here.
+interval: "120s"
+reconcileTimeout: "60s"
+hubName: ocp4-example
+agentNamespace: inventory
+installURL: https://workflows.example.invalid/workflows/server-lifecycle/install-server
+maxSlots: 100
+ambiguousWait: "5m"
+stuckAfter: "2h"
+temporalAddress: temporal.example.invalid:7233
+temporalNamespace: default
+activityQueue: server-lifecycle-activity-ocp4-example
+workflowQueue: install-server-workflow
+segmentQueue: segment-lifecycle-activity
+defaults:
+  lowPct: 15
+  highPct: 30
+  minFree: 2
+  minBand: 1
+  maxOpenRunsPerPool: 15
+  probeInterval: "20m"
+  drawGrace: "2m"
+  failureMemory: "6h"
+  settlingMax: "60m"
+  dryRunGrow: false
+  paused: false
+pools:
+  "32-128-zone-1": {minFree: 5, maxOpenRunsPerPool: 8, dryRunGrow: true}
+  "16-64-zone-2": {paused: true, dryRunGrow: true}
+  "8-32-zone-1": {lowPct: 25, dryRunGrow: true}

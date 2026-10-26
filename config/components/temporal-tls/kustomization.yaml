@@ -1,0 +1,24 @@
+# Opt-in: TLS (and optionally mTLS) to Temporal. Requires the Secret `herzi-temporal-tls` with
+# ca.crt (and tls.crt + tls.key for mTLS). Without this component herzi speaks plain gRPC.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+- target:
+    kind: Deployment
+    name: herzi
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value: {name: HERZI_TEMPORAL_TLS_CA_FILE, value: /etc/herzi-temporal/ca.crt}
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value: {name: HERZI_TEMPORAL_TLS_CERT_FILE, value: /etc/herzi-temporal/tls.crt}
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value: {name: HERZI_TEMPORAL_TLS_KEY_FILE, value: /etc/herzi-temporal/tls.key}
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/-
+      value: {name: temporal-tls, mountPath: /etc/herzi-temporal, readOnly: true}
+    - op: add
+      path: /spec/template/spec/volumes/-
+      value: {name: temporal-tls, secret: {secretName: herzi-temporal-tls, defaultMode: 292}}

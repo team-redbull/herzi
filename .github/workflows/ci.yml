@@ -1,0 +1,58 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make fmt vet lint test vuln
+      - name: Enforce core unit coverage of at least 90 percent
+        shell: bash
+        run: |
+          for package in pipeline config; do
+            awk -v p="/internal/$package/" '
+              index($1,p) { total += $2; if ($3 > 0) covered += $2 }
+              END { if (total == 0 || covered / total < 0.90) exit 1 }
+            ' cover.out
+          done
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Require WP6 suite to load the external CRD fixtures
+        run: |
+          if ! grep -Eq '"test"[[:space:]]*,[[:space:]]*"crds"|test/crds' internal/controller/suite_test.go; then
+            echo 'WP6 must point envtest CRDDirectoryPaths at test/crds before integration can pass'
+            exit 1
+          fi
+      - run: make test-integration
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - run: make lint-manifests
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - run: make docker-build IMG=herzi:ci VERSION=ci COMMIT="$GITHUB_SHA"
