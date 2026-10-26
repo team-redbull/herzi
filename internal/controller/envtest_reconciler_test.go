@@ -26,8 +26,11 @@ var _ = Describe("Inventory watches", func() {
 		if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 			Skip("KUBEBUILDER_ASSETS is unset")
 		}
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "inventory"}})).To(Succeed())
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant"}})).To(Succeed())
+		for _, name := range []string{"inventory", "tenant"} {
+			err := k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})
+			Expect(client.IgnoreAlreadyExists(err)).To(Succeed())
+		}
+		deleteAfterSpec(agent("one", "p"), agent("two", "p"), infra("p"), node("workers", "p", 0))
 		initial := testConfig()
 		initial.Interval = time.Hour
 		store := config.NewStore(initial)
