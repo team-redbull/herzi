@@ -28,7 +28,7 @@ UNIT_PACKAGES = $$(go list ./internal/... | sed '\|/internal/controller\(/\|$$\)
 INTEGRATION_PACKAGES ?= ./internal/controller/...
 ignore-not-found ?= false
 
-.PHONY: all help manifests generate fmt vet test test-integration lint lint-fix lint-config vuln ci build run docker-build docker-push docker-buildx build-installer deploy undeploy lint-manifests kustomize controller-gen envtest setup-envtest golangci-lint govulncheck
+.PHONY: all help manifests generate fmt vet test test-integration lint lint-fix lint-config vuln ci build run docker-build docker-push docker-buildx build-installer deploy undeploy lint-manifests check-rbac manifests-drift kustomize controller-gen envtest setup-envtest golangci-lint govulncheck
 all: build
 help: ## Display targets.
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -57,7 +57,7 @@ build: ## Build the static controller binary.
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)' -o bin/manager ./cmd
 run: ## Run against the current kubeconfig with the sample config.
-	go run ./cmd --leader-elect --config="$(CONFIG)" --health-probe-bind-address=:8081 --metrics-bind-address=:8443
+	go run ./cmd --leader-elect=false --config="$(CONFIG)" --health-probe-bind-address=:8081 --metrics-bind-address=:8443
 docker-build: ## Build an image without pushing.
 	$(CONTAINER_TOOL) build --build-arg VERSION="$(VERSION)" --build-arg COMMIT="$(COMMIT)" -t "$(IMG)" .
 docker-push: ## Push an explicitly selected image.
@@ -75,7 +75,7 @@ deploy: manifests kustomize ## Deploy to the current kubeconfig context after th
 undeploy: kustomize ## Delete the installation, including its namespace; back up secrets first.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 lint-manifests: ## Render all trees; validate known Kubernetes schemas when kubeconform exists.
-	@for tree in default manager rbac samples prometheus network-policy; do \
+	@for tree in default manager rbac samples prometheus network-policy overlays/tls overlays/mtls overlays/example; do \
 	  output=$$(mktemp); \
 	  "$(KUBECTL)" kustomize config/$$tree > "$$output"; \
 	  if command -v kubeconform >/dev/null 2>&1; then \
@@ -83,6 +83,17 @@ lint-manifests: ## Render all trees; validate known Kubernetes schemas when kube
 	  else echo "kubeconform unavailable: rendered $$tree only"; fi; \
 	  rm -f "$$output"; \
 	done
+
+check-rbac: ## Fail unless the default install grants the controller what it reads and patches.
+	@out=$$(mktemp); "$(KUBECTL)" kustomize config/default > "$$out"; status=0; \
+	for need in 'name: manager-role' 'name: manager-rolebinding' '- agents' '- infraenvs' '- nodepools' 'namespace: herzi-system'; do \
+	  grep -q -- "$$need" "$$out" || { echo "check-rbac: rendered config/default lacks '$$need'"; status=1; }; \
+	done; \
+	grep -q 'kind: ClusterRole$$' "$$out" || { echo "check-rbac: no ClusterRole rendered"; status=1; }; \
+	rm -f "$$out"; exit $$status
+
+manifests-drift: manifests ## Fail when the committed role.yaml differs from what the markers generate.
+	@git diff --exit-code -- config/rbac/role.yaml || { echo "manifests-drift: run 'make manifests' and commit config/rbac/role.yaml"; exit 1; }
 
 $(LOCALBIN):
 	mkdir -p "$(LOCALBIN)"

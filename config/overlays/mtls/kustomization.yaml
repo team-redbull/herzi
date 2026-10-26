@@ -1,0 +1,8 @@
+# Example overlay: mutual TLS to Temporal. Needs the Secret herzi-temporal-tls with ca.crt, tls.crt, tls.key.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../default
+components:
+- ../../components/temporal-tls
+- ../../components/temporal-mtls

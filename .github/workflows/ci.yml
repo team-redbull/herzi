@@ -1,12 +1,18 @@
 name: CI
 on:
   push:
+    branches: [main]
   pull_request:
+# A new push to the same branch or PR cancels the superseded run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -27,6 +33,7 @@ jobs:
           done
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -35,22 +42,28 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Require WP6 suite to load the external CRD fixtures
-        run: |
-          if ! grep -Eq '"test"[[:space:]]*,[[:space:]]*"crds"|test/crds' internal/controller/suite_test.go; then
-            echo 'WP6 must point envtest CRDDirectoryPaths at test/crds before integration can pass'
-            exit 1
-          fi
       - run: make test-integration
   manifests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - run: make lint-manifests
+      # Go is needed to run controller-gen for the drift check.
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Every tree renders, schemas validate when kubeconform exists
+        run: make lint-manifests
+      - name: The default install grants the controller what it reads and patches
+        run: make check-rbac
+      - name: The committed role.yaml equals what the RBAC markers generate
+        run: make manifests-drift
   image:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

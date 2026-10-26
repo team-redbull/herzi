@@ -56,6 +56,9 @@ import (
 // version is set at build time: -ldflags "-X main.version=...".
 var version = "dev"
 
+// commit is set at build time: -ldflags "-X main.commit=...". It identifies the exact source of a binary.
+var commit = "none"
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -115,7 +118,7 @@ func run(args []string) int {
 	}
 
 	if o.showVersion {
-		fmt.Println("herzi", version)
+		fmt.Println("herzi", version, commit)
 		return 0
 	}
 
@@ -124,12 +127,12 @@ func run(args []string) int {
 	// Without a valid configuration there is nothing safe to do: fail fast and loudly.
 	raw, err := os.ReadFile(o.configPath)
 	if err != nil {
-		setupLog.Error(nil, "Could not read the configuration file", "path", o.configPath)
+		setupLog.Error(err, "Could not read the configuration file", "path", o.configPath)
 		return 1
 	}
 	initial, err := config.Load(raw)
 	if err != nil {
-		setupLog.Error(nil, "The configuration file is invalid", "path", o.configPath)
+		setupLog.Error(err, "The configuration file is invalid", "path", o.configPath)
 		return 1
 	}
 	store := config.NewStore(initial)
@@ -140,7 +143,7 @@ func run(args []string) int {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(),
 		managerOptions(hub, metricsServerOptions, o.probeAddr, o.enableLeaderElection))
 	if err != nil {
-		setupLog.Error(nil, "Failed to start manager")
+		setupLog.Error(err, "Failed to start manager")
 		return 1
 	}
 
@@ -156,7 +159,7 @@ func run(args []string) int {
 		Identity:  "herzi/" + version + "@" + hub.HubName,
 	})
 	if err != nil {
-		setupLog.Error(nil, "Failed to create the Temporal client")
+		setupLog.Error(err, "Failed to create the Temporal client")
 		return 1
 	}
 	defer tc.Close()
@@ -177,7 +180,7 @@ func run(args []string) int {
 		Timeout: installTimeout(hub.ReconcileTimeout), BearerToken: os.Getenv(envBearerToken),
 	})
 	if err != nil {
-		setupLog.Error(nil, "Failed to create the installer client")
+		setupLog.Error(err, "Failed to create the installer client")
 		return 1
 	}
 
@@ -193,31 +196,31 @@ func run(args []string) int {
 		Sweeper: sweeper, Queues: queues, Installer: inst, Metrics: m, Reload: reload,
 	})
 	if err != nil {
-		setupLog.Error(nil, "Failed to create the controller")
+		setupLog.Error(err, "Failed to create the controller")
 		return 1
 	}
 	if err := r.SetupWithManager(mgr); err != nil {
-		setupLog.Error(nil, "Failed to set up the controller")
+		setupLog.Error(err, "Failed to set up the controller")
 		return 1
 	}
 	if err := mgr.Add(watcher); err != nil {
-		setupLog.Error(nil, "Failed to add the configuration watcher")
+		setupLog.Error(err, "Failed to add the configuration watcher")
 		return 1
 	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(nil, "Failed to set up health check")
+		setupLog.Error(err, "Failed to set up health check")
 		return 1
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(nil, "Failed to set up ready check")
+		setupLog.Error(err, "Failed to set up ready check")
 		return 1
 	}
 
-	setupLog.Info("Starting manager", "version", version, "hub", hub.HubName, "agentNamespace", hub.AgentNamespace)
+	setupLog.Info("Starting manager", "version", version, "commit", commit, "hub", hub.HubName, "agentNamespace", hub.AgentNamespace)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(nil, "Failed to run manager")
+		setupLog.Error(err, "Failed to run manager")
 		return 1
 	}
 	return 0

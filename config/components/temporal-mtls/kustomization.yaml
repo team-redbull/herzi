@@ -1,0 +1,16 @@
+# Opt-in: a client certificate for mutual TLS to Temporal. Use TOGETHER with ../temporal-tls (it mounts the
+# Secret); this component only adds the two environment variables, so the Secret must hold tls.crt and
+# tls.key as well as ca.crt. If either file is missing the pod exits at start with the reason in its log.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+- target:
+    kind: Deployment
+    name: herzi
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value: {name: HERZI_TEMPORAL_TLS_CERT_FILE, value: /etc/herzi-temporal/tls.crt}
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value: {name: HERZI_TEMPORAL_TLS_KEY_FILE, value: /etc/herzi-temporal/tls.key}

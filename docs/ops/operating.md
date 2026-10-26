@@ -2,20 +2,27 @@
 
 This implements design Part 2, Config: “Hub settings ... cannot differ per pool”
 and Part 1, cases 9–15 (ambiguity, lease loss, pause and dry run). The design is
-the behavior contract; WP5 packaging does not implement the controller itself.
+the behavior contract.
 
 ## Integration status and release gates
 
-The inspected `cmd/main.go` is still the manager scaffold. It has no `--config`
-flag, no herzi controller/metrics wiring, no TLS/API credential environment loading,
-no version/commit variables, and no enabled `LeaderElectionReleaseOnCancel` or
-zero graceful shutdown timeout. The supplied Deployment therefore cannot start
-successfully against that entrypoint until WP6 completes these interfaces. The
-linker flags are ready, but version/commit must be declared and surfaced by WP6.
-The generated scaffold Pod-reader role is excluded; complete the gate in
-[rbac.md](rbac.md) before deployment. The envtest suite still needs `test/crds`
-as its CRD directory, with missing-directory errors enabled. CI explicitly fails
-that integration gate instead of silently passing an empty CRD suite.
+The controller, metrics, manager wiring (`--config`, leader election with a stable id and release on
+cancel, secure metrics, HTTP/2 off, a lazy Temporal client, credentials from the environment) and the
+generated RBAC are implemented and covered by unit tests plus an envtest suite that runs against a real
+kube-apiserver. `golangci-lint` and `govulncheck` are clean. These things have **not** been exercised and are
+the release gates, to be closed on a real hub before the first real order:
+
+1. **A container build and a deployment** (no Docker or cluster was available during development).
+2. **Temporal and the install route, live:** `DescribeTaskQueue` permission and the task-queue names on your
+   server, the `NotFound` error and the namespace retention (retention must be well above
+   `failureMemory`), and that the controller's network path to the workflows API works.
+3. **The assumptions in the design's "To verify on a real hub" list** (Agent labels and states, NodePool
+   `pausedUntil`, wipe-before-register ordering).
+4. **The hosted CI workflow** (it is written and every step maps to a Makefile target that runs locally).
+
+Roll out in this order: install with every pool at `dryRunGrow: true`; read the `WOULD INSTALL` lines and the
+`herzi_pool_*` gauges for a few days; enable one small pool; then the rest. `make check-rbac` fails when the
+default install does not grant the controller what it reads (it caught a missing role once; it also runs in CI).
 
 ## Config model
 
@@ -33,9 +40,9 @@ keep the last good snapshot. Merged per-pool constraints include nonnegative
 percentages with lowPct <= highPct, minFree >= 0, minBand >= 1, open-run cap
 between 1 and maxSlots, positive durations and drawGrace < probeInterval.
 An invalid pool is blocked with its reason. A frozen snapshot serves each pass.
-The ConfigMap watch requeues all pools; the directory mount avoids subPath, so
-Kubernetes can refresh its contents. Check both the accepted-config metric and
-logs after updating; projected file refresh is not instantaneous.
+herzi polls the mounted file every ten seconds and requeues all pools when an accepted change
+appears; the directory mount avoids subPath so Kubernetes can refresh its contents (the kubelet
+needs up to about a minute). Check both the accepted-config metric and the logs after updating.
 
 ```bash
 kubectl kustomize config/samples | kubectl -n herzi-system apply -f -
@@ -77,7 +84,15 @@ Other secrets:
 | Secret | Keys | Consumer |
 |---|---|---|
 | herzi-api (optional) | token | `HERZI_API_BEARER_TOKEN` environment variable (absent when the Secret is absent) |
+| (any Secret you wire in) | api key | `HERZI_TEMPORAL_API_KEY` environment variable: a Temporal Cloud/API-key credential. Not set by default; add it to the Deployment yourself with a `secretKeyRef`. Never log or place it in the ConfigMap. |
 | herzi-prometheus-token | token | ServiceMonitor authorization credential |
+
+**Monitoring needs more than herzi does.** The shipped ServiceMonitor verifies the metrics certificate against the
+`ca.crt` in `herzi-metrics-tls` and presents the token in `herzi-prometheus-token`, and the Prometheus
+ServiceAccount must be bound to `metrics-reader`. So scraping requires the `metrics-tls` component, those Secrets
+and that binding; the default install (self-signed metrics certificate) is scrapeable only with TLS verification
+relaxed in your own ServiceMonitor. Because a scrape gap would also silence the alerts, the
+`HerziControllerDown` alert fires on missing series.
 
 Never embed TLS keys or bearer tokens in the ConfigMap. The mounted certificate files are world-readable
 inside the container (0444), which lets UID 65532 read Secrets owned by root; no writable root is needed.
@@ -111,7 +126,7 @@ NetworkPolicy ipBlocks automatically.
 
 ## Dry-run rollout
 
-1. Complete the WP6 release gates above. Verify the real-hub checklist below,
+1. Close the release gates above. Verify the real-hub checklist below,
    external CRDs, TLS trust, namespace/queues and the route's slot limit.
 2. Set `dryRunGrow: true` explicitly on **every managed pool first** (the shipped
    three examples do this); also set `defaults.dryRunGrow: true` for new pools.
@@ -157,7 +172,7 @@ Back those up and assess other namespace users before `make undeploy`.
 
 ## Lease loss and restart
 
-Required WP6 behavior: lease loss exits immediately with no graceful draining
+Behavior: lease loss exits immediately with no graceful draining
 (`GracefulShutdownTimeout = 0`); enable `LeaderElectionReleaseOnCancel` for clean
 rollouts and exit as soon as the manager stops. The Pod's 30-second termination
 grace is an upper bound for Kubernetes, not permission to keep ordering after

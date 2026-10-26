@@ -25,10 +25,10 @@ spec:
     spec:
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 30
+      # No fixed runAsUser/runAsGroup: OpenShift's restricted-v2 SCC only admits UIDs from the namespace's
+      # allocated range and assigns one itself. runAsNonRoot holds because the image USER is numeric (65532).
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -72,6 +72,8 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 10
         env:
+        - name: GOMEMLIMIT
+          value: 400MiB # ~80% of the 512Mi limit
         - name: HERZI_API_BEARER_TOKEN
           valueFrom:
             secretKeyRef:

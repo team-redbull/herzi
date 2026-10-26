@@ -1,4 +1,5 @@
-# EXAMPLE ONLY: replace TEST-NET /32s with API server, Temporal, workflows IPs.
+# EXAMPLE ONLY: replace TEST-NET /32s with API server, Temporal, workflows IPs. The DNS rules cover both
+# vanilla Kubernetes and OpenShift; keep the one that matches your platform.
 # Check pre/post-DNAT handling and node-local DNS with your CNI before applying.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -31,6 +32,7 @@ spec:
     ports:
     - port: 443
       protocol: TCP
+  # DNS, vanilla Kubernetes (CoreDNS in kube-system listens on 53).
   - to:
     - namespaceSelector:
         matchLabels:
@@ -42,4 +44,15 @@ spec:
     - port: 53
       protocol: UDP
     - port: 53
+      protocol: TCP
+  # DNS, OpenShift: the dns-default pods in openshift-dns listen on 5353 (the Service maps 53 -> 5353 and
+  # NetworkPolicy sees the pod port). Keep the rule for your platform, drop the other.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-dns
+    ports:
+    - port: 5353
+      protocol: UDP
+    - port: 5353
       protocol: TCP

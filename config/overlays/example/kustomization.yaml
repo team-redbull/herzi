@@ -1,0 +1,10 @@
+# TRY-IT overlay: the default install plus the SAMPLE configuration (example endpoints, three pools that
+# all start in dry-run). Never apply this to a real hub unchanged: replace hubName, installURL and
+# temporalAddress first. The default install (../../default) deliberately ships NO herzi-config, so a
+# forgotten ConfigMap is an obvious ContainerCreating/FailedMount instead of a pod that talks to
+# *.example.invalid.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../default
+- ../../samples

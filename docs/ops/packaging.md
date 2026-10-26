@@ -1,3 +1,8 @@
+> **Historical record.** This is the report of the packaging work package as it was delivered, before the
+> controller was wired. Statements about what "WP6 must still do" are out of date: the manager wiring, the
+> generated RBAC and the envtest suite now exist. Where this file disagrees with `README.md`,
+> `operating.md` or `rbac.md`, those win.
+
 # WP5 packaging report
 
 ## Files delivered

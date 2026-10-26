@@ -1,8 +1,7 @@
 # herzi alert runbook
 
 Implements design Part 2, “Alert by failure type (metrics, not decisions)”,
-and Part 3, orphan-bound Agents and stuck runs. These procedures apply once WP6
-implements the metric catalogue and controller wiring. Replace pool names with the
+and Part 3, orphan-bound Agents and stuck runs. Replace pool names with the
 alert's `pool` label; the namespace below assumes the shipped example.
 
 ## Common confirmation commands
@@ -135,6 +134,34 @@ herzi_pollers
 Check Temporal DescribeTaskQueue credentials, actual task queue names and the corresponding worker deployment. Restore workers and verify positive poller counts before expecting growth. Poller records linger roughly five minutes after worker death.
 
 <a id="not-reconciling"></a>
+
+<a id="controller-down"></a>
+
+## HerziControllerDown
+
+herzi exports no `herzi_config_valid` series for ten minutes: the controller is not running, is crash-looping, or Prometheus cannot scrape it. **Nothing is keeping any pool filled while this fires**, and every other herzi alert is silent because they all compare herzi series that do not exist. Missing series is the only signal in this state, which is why this alert uses `absent()`.
+
+Confirm:
+
+```promql
+absent(herzi_config_valid)
+up{job=~".*herzi.*"}
+```
+
+```bash
+kubectl -n herzi-system get deployment herzi
+kubectl -n herzi-system get pods -l app.kubernetes.io/name=herzi -o wide
+kubectl -n herzi-system describe pod -l app.kubernetes.io/name=herzi | sed -n '/Events:/,$p'
+kubectl -n herzi-system logs deployment/herzi -c manager --previous --tail=100
+```
+
+The usual causes, in the order to check them:
+
+1. `ContainerCreating` with a `FailedMount` event: the `herzi-config` ConfigMap (or an opted-in TLS Secret) does not exist. The default install ships no ConfigMap on purpose.
+2. `CrashLoopBackOff` with `The configuration file is invalid` in the log: the log line carries the offending key; fix the ConfigMap.
+3. `CrashLoopBackOff` after about two minutes with `Failed to run manager` and a cache-sync error: the controller is **missing RBAC** for Agents, InfraEnvs or NodePools. Check `kubectl auth can-i list agents.agent-install.openshift.io --as=system:serviceaccount:herzi-system:controller-manager -n inventory` (and the same for `infraenvs` and `nodepools`).
+4. A wrong `agentNamespace`: the pod runs but sees no InfraEnvs. The metrics exist in that case, so this alert does not fire; check `herzi_pool_*` for the pools you configured.
+5. The pod is healthy but Prometheus cannot scrape it: check the ServiceMonitor, the metrics TLS CA and the `metrics-reader` binding (see operating.md, secure monitoring).
 
 ## HerziNotReconciling
 

@@ -18,14 +18,16 @@ and preserves the last good snapshot when an update cannot be parsed.
 
 ## Status
 
-**v1 shrink is log-only (`WOULD REMOVE`).** Grow is the intended real operation;
-VM creation, cooldown, real shrink and route idempotency are backlog items.
-This work package delivers packaging, not completed controller wiring. The current
-entrypoint still lacks `--config`, secret loading, the controller/metric wiring
-and required lease shutdown settings. The generated controller RBAC and envtest
-CRD path also await WP6. Do not deploy this image for production orders until the
-[release gates](docs/ops/operating.md#integration-status-and-release-gates) pass.
-Docker builds, cluster behavior and hosted CI were not executed in this workspace.
+**v1 shrink is log-only (`WOULD REMOVE`).** Growing is real; VM creation, the
+cooldown, real shrink and an idempotency key on the install route are backlog items.
+
+The controller, metrics, manager wiring, RBAC and packaging are implemented and tested:
+unit tests, an envtest suite against a real kube-apiserver, `golangci-lint` and
+`govulncheck` are clean. What has **not** been exercised: a container build, a real
+cluster, a live Temporal service and the install route, and the hosted CI workflow
+(none of them are available in the development workspace). Roll out as the
+[operating guide](docs/ops/operating.md#integration-status-and-release-gates) describes:
+every pool starts with `dryRunGrow: true`.
 
 ## Architecture
 
@@ -54,7 +56,7 @@ integration uses pinned setup-envtest and a local API server/etcd, without Docke
 export PATH=/home/linuxbrew/.linuxbrew/bin:$PATH
 make build
 make test                     # unit race tests, cover.out
-make test-integration         # envtest; requires the WP6 suite gate
+make test-integration         # envtest: a real kube-apiserver and etcd, CRD stubs from test/crds
 make ci                       # lint, vet, unit tests, govulncheck
 make lint-manifests
 ```
@@ -68,7 +70,7 @@ Local execution uses your current kubeconfig identity and can order real machine
 ```bash
 make run CONFIG=config/samples/herzi-config.yaml
 # Equivalent after building:
-./bin/manager --leader-elect --config=config/samples/herzi-config.yaml \
+./bin/manager --leader-elect=false --config=config/samples/herzi-config.yaml \
   --health-probe-bind-address=:8081 --metrics-bind-address=:8443
 ```
 
@@ -77,7 +79,7 @@ provisioned TLS Secrets. Envtest CRDs are permissive test fixtures only. Select
 an immutable image and a deliberately chosen kubeconfig context.
 
 ```bash
-make manifests                # WP6 controller markers generate role.yaml
+make manifests                # controller markers generate config/rbac/role.yaml
 # Review docs/ops/rbac.md and enable the generated role and binding after review.
 make docker-build IMG=<registry>/herzi:<version> VERSION=<version> COMMIT=<commit>
 make docker-push IMG=<registry>/herzi:<version>
@@ -110,11 +112,11 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | maxSlots | 100 | Hub | Must equal the API route slot range |
 | ambiguousWait | 5m | Hub | Persisted block after an unclear POST |
 | stuckAfter | 2h | Hub | Open-run warning age; shipped alert fixed at 2h |
-| temporalAddress | Required/site-specific | Hub | Temporal host:port; sample uses TLS port 7233 |
-| temporalNamespace | Required/site-specific | Hub | Temporal namespace; sample uses default |
-| activityQueue | Required/site-specific | Hub | Hub activity queue; server-lifecycle-activity-<mce> |
-| workflowQueue | Required/site-specific | Hub | Install workflow queue; sample install-server-workflow |
-| segmentQueue | Required/site-specific | Hub | Segment activity queue; verify actual name |
+| temporalAddress | Required/site-specific | Hub | Temporal host:port (plain gRPC unless the TLS component is used) |
+| temporalNamespace | default | Hub | Temporal namespace |
+| activityQueue | server-lifecycle-activity-<hubName> | Hub | Hub activity queue, derived from hubName when not written |
+| workflowQueue | install-server-workflow | Hub | Install workflow queue |
+| segmentQueue | segment-lifecycle-activity | Hub | Segment activity queue |
 | lowPct | 15 | Pool | Lower spare percentage, integer half-up rounding |
 | highPct | 30 | Pool | Upper spare percentage |
 | minFree | 2 | Pool | Lower spare floor; include Replace upgrade surge |
@@ -174,7 +176,7 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 
 ## Metrics
 
-The catalogue below is copied from [PLAN.md](docs/PLAN.md); WP6 implements it.
+The catalogue below is copied from [PLAN.md](docs/PLAN.md) and implemented in `internal/metrics`.
 Prefix `herzi_`. Labels: `pool` = InfraEnv name. Slash abbreviations share the
 preceding `herzi_pool_` prefix (for example `_assigned` means `herzi_pool_assigned`).
 
