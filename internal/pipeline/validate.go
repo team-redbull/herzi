@@ -2,7 +2,7 @@ package pipeline
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/team-redbull/herzi/internal/config"
 )
@@ -51,7 +51,7 @@ func Validate(f PoolFacts, raw RawSnapshot, _ config.PoolConfig) Verdict {
 	if raw.Pollers.Segment == 0 {
 		v.Reasons = append(v.Reasons, "segment queue has no pollers")
 	}
-	sort.Strings(v.Reasons)
+	slices.Sort(v.Reasons)
 	v.Blocked = len(v.Reasons) > 0
 	return v
 }

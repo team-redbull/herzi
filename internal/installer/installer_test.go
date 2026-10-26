@@ -62,7 +62,7 @@ func TestSuccessAndExactRequest(t *testing.T) {
 						t.Error("authorization mismatch")
 					}
 					w.WriteHeader(code)
-					io.WriteString(w, mixedReport)
+					_, _ = io.WriteString(w, mixedReport)
 				}))
 				defer server.Close()
 				i := newTestInstaller(t, server.URL+"/workflows/server-lifecycle/install-server", func(o *Options) { o.BearerToken = token }, server.Client())
@@ -131,7 +131,7 @@ func TestHTTPClassification(t *testing.T) {
 				calls.Add(1)
 				w.Header().Set("Location", "/redirected")
 				w.WriteHeader(tc.code)
-				io.WriteString(w, tc.body)
+				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer server.Close()
 			i := newTestInstaller(t, server.URL, nil, server.Client())
@@ -149,7 +149,7 @@ func TestRejectDetailLimitAndRedaction(t *testing.T) {
 	token := "do-not-expose"
 	server := newPipeServer(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(422)
-		io.WriteString(w, token+strings.Repeat("x", 1000))
+		_, _ = io.WriteString(w, token+strings.Repeat("x", 1000))
 	}))
 	defer server.Close()
 	i := newTestInstaller(t, server.URL, func(o *Options) { o.BearerToken = token }, server.Client())
@@ -165,7 +165,7 @@ func TestTimeoutAndCancellation(t *testing.T) {
 			var calls atomic.Int32
 			server := newPipeServer(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
-				io.Copy(io.Discard, r.Body)
+				_, _ = io.Copy(io.Discard, r.Body)
 				select {
 				case <-r.Context().Done():
 				case <-time.After(200 * time.Millisecond):
@@ -291,12 +291,12 @@ func (l *pipeListener) dial(ctx context.Context, _, _ string) (net.Conn, error) 
 	case l.connections <- server:
 		return client, nil
 	case <-ctx.Done():
-		client.Close()
-		server.Close()
+		_ = client.Close()
+		_ = server.Close()
 		return nil, ctx.Err()
 	case <-l.done:
-		client.Close()
-		server.Close()
+		_ = client.Close()
+		_ = server.Close()
 		return nil, net.ErrClosed
 	}
 }

@@ -65,9 +65,9 @@ func TestStoreLastGoodAndValid(t *testing.T) {
 func TestStoreOwnsInitial(t *testing.T) {
 	initial := validConfig(t)
 	initial.Pools = map[string]config.PoolOverride{"test": {
-		LowPct: ptr(15), HighPct: ptr(30), MinFree: ptr(2), MinBand: ptr(1), MaxOpenRunsPerPool: ptr(15),
+		LowPct: new(15), HighPct: new(30), MinFree: new(2), MinBand: new(1), MaxOpenRunsPerPool: new(15),
 		ProbeInterval: ptr(20 * time.Minute), DrawGrace: ptr(2 * time.Minute), FailureMemory: ptr(6 * time.Hour), SettlingMax: ptr(time.Hour),
-		DryRunGrow: ptr(false), Paused: ptr(false),
+		DryRunGrow: new(false), Paused: new(false),
 	}, "empty": {}}
 	s := config.NewStore(initial)
 	*initial.Pools["test"].MinFree = 999
@@ -81,11 +81,11 @@ func TestStoreConcurrentSnapshotUpdate(t *testing.T) {
 	s := config.NewStore(validConfig(t))
 	const attempts = 60
 	var wg sync.WaitGroup
-	for worker := 0; worker < 8; worker++ {
+	for worker := range 8 {
 		wg.Add(1)
 		go func(worker int) {
 			defer wg.Done()
-			for i := 0; i < attempts; i++ {
+			for i := range attempts {
 				if worker%2 == 0 {
 					free := i % 10
 					data := fmt.Appendf(nil, "%sdefaults: {minFree: %d}\npools: {test: {minFree: %d}}\n", minimal, free, free)

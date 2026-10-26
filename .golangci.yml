@@ -47,6 +47,12 @@ linters:
           - dupl
           - lll
         path: internal/*
+      # Test tables repeat literals and carry long fixture lines by design.
+      - linters:
+          - goconst
+          - lll
+          - gocyclo
+        path: _test\.go
     paths:
       - third_party$
       - builtin$

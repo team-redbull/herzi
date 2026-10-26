@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -50,7 +51,7 @@ func New(o Options) (*Installer, error) {
 		return nil, fmt.Errorf("bearer token contains invalid header characters")
 	}
 	if o.Timeout < 0 {
-		return nil, fmt.Errorf("Timeout must not be negative")
+		return nil, errors.New("timeout must not be negative")
 	}
 	// ASSUMPTION: An omitted timeout uses 30 seconds, below the default reconcile deadline.
 	if o.Timeout == 0 {
@@ -108,7 +109,7 @@ func (i *Installer) Install(ctx context.Context, req pipeline.InstallRequest) (p
 		}
 		return result, fmt.Errorf("%w: HTTP transport failed", pipeline.ErrAmbiguous)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }() // a close error after the body was read changes nothing
 	result.HTTPCode = response.StatusCode
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, maxBody+1))
 	if response.StatusCode >= 400 && response.StatusCode < 500 {

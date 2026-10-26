@@ -22,7 +22,7 @@ workflowQueue: workflows
 segmentQueue: segments
 `
 
-func ptr[T any](v T) *T { return &v }
+func ptr[T any](v T) *T { return new(v) }
 func validConfig(t *testing.T) config.Config {
 	t.Helper()
 	c, err := config.Load([]byte(minimal))
@@ -164,8 +164,8 @@ func TestGoldenSample(t *testing.T) {
 		LowPct: 15, HighPct: 30, MinFree: 2, MinBand: 1, MaxOpenRunsPerPool: 15, ProbeInterval: 20 * time.Minute,
 		DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour,
 	}, Pools: map[string]config.PoolOverride{
-		"32-128-zone-1": {MinFree: ptr(5), MaxOpenRunsPerPool: ptr(8)},
-		"16-64-zone-2":  {Paused: ptr(true)}, "8-32-zone-1": {LowPct: ptr(25), DryRunGrow: ptr(true)},
+		"32-128-zone-1": {MinFree: new(5), MaxOpenRunsPerPool: new(8)},
+		"16-64-zone-2":  {Paused: new(true)}, "8-32-zone-1": {LowPct: new(25), DryRunGrow: new(true)},
 	}}
 	if diff := cmp.Diff(want, c); diff != "" {
 		t.Fatal(diff)
@@ -318,7 +318,7 @@ func TestValidationCollectsAllProblems(t *testing.T) {
 	c.HubName = ""
 	c.Interval = 0
 	c.Defaults.MinFree = -1
-	c.Pools = map[string]config.PoolOverride{"z": {LowPct: ptr(-2)}, "a": {MinBand: ptr(0)}}
+	c.Pools = map[string]config.PoolOverride{"z": {LowPct: new(-2)}, "a": {MinBand: new(0)}}
 	err := c.Validate()
 	requireError(t, err, "hubName", "interval", "defaults", "minFree", `pool "z"`, "lowPct", `pool "a"`, "minBand")
 	joined, ok := err.(interface{ Unwrap() []error })

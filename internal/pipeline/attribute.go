@@ -1,7 +1,8 @@
 package pipeline
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"time"
 
 	"github.com/team-redbull/herzi/internal/kube"
@@ -9,6 +10,8 @@ import (
 
 // Attribute implements design Part 2, "Stage 1 — Attribute (pure)":
 // "Open = Running slots; Closed = closed slots" and pool-scoped demand attribution.
+//
+//nolint:gocyclo // a flat list of the design's attribution rules; each rule has its own test
 func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 	facts := make(map[PoolKey]PoolFacts, len(raw.InfraEnvs))
 	var warnings []Warning
@@ -76,17 +79,14 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 	}
 	// ASSUMPTION: the contract has no hub-level return value, so every pool carries
 	// the same hub warnings. Consumers should deduplicate warnings when reporting a hub.
-	sort.Slice(warnings, func(i, j int) bool {
-		if warnings[i].Object != warnings[j].Object {
-			return warnings[i].Object < warnings[j].Object
-		}
-		return warnings[i].Msg < warnings[j].Msg
+	slices.SortFunc(warnings, func(a, b Warning) int {
+		return cmp.Or(cmp.Compare(a.Object, b.Object), cmp.Compare(a.Msg, b.Msg))
 	})
 	keys := make([]PoolKey, 0, len(facts))
 	for key := range facts {
 		keys = append(keys, key)
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	slices.Sort(keys)
 	for _, key := range keys {
 		f := facts[key]
 		for _, r := range raw.Sweep[key].Slots {
@@ -99,9 +99,9 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 				f.Closed = append(f.Closed, r)
 			}
 		}
-		sort.Slice(f.Open, func(i, j int) bool { return f.Open[i].Slot < f.Open[j].Slot })
-		sort.Slice(f.Closed, func(i, j int) bool { return f.Closed[i].Slot < f.Closed[j].Slot })
-		sort.Slice(f.Problems, func(i, j int) bool { return f.Problems[i].Msg < f.Problems[j].Msg })
+		slices.SortFunc(f.Open, func(a, b SlotRun) int { return cmp.Compare(a.Slot, b.Slot) })
+		slices.SortFunc(f.Closed, func(a, b SlotRun) int { return cmp.Compare(a.Slot, b.Slot) })
+		slices.SortFunc(f.Problems, func(a, b Problem) int { return cmp.Compare(a.Msg, b.Msg) })
 		f.Warnings = append([]Warning(nil), warnings...)
 		facts[key] = f
 	}

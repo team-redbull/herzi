@@ -26,10 +26,13 @@ const (
 	AnnotationPaused = "herzi.redbull.io/paused"
 )
 
+// apiVersion is the served version of all three kinds.
+const apiVersion = "v1beta1"
+
 var (
-	InfraEnvGVK = schema.GroupVersionKind{Group: "agent-install.openshift.io", Version: "v1beta1", Kind: "InfraEnv"}
-	AgentGVK    = schema.GroupVersionKind{Group: "agent-install.openshift.io", Version: "v1beta1", Kind: "Agent"}
-	NodePoolGVK = schema.GroupVersionKind{Group: "hypershift.openshift.io", Version: "v1beta1", Kind: "NodePool"}
+	InfraEnvGVK = schema.GroupVersionKind{Group: "agent-install.openshift.io", Version: apiVersion, Kind: "InfraEnv"}
+	AgentGVK    = schema.GroupVersionKind{Group: "agent-install.openshift.io", Version: apiVersion, Kind: "Agent"}
+	NodePoolGVK = schema.GroupVersionKind{Group: "hypershift.openshift.io", Version: apiVersion, Kind: "NodePool"}
 )
 
 // InfraEnv is the pool: one node type in one zone.

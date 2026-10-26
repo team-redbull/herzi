@@ -16,7 +16,7 @@ func NewUnstructured(gvk schema.GroupVersionKind) *unstructured.Unstructured {
 // PartialTransform implements Part 2, Cache: "strip managedFields and inventory
 // with a DefaultTransform" while retaining the complete parsed views.
 func PartialTransform() cache.TransformFunc {
-	return func(obj interface{}) (interface{}, error) {
+	return func(obj any) (any, error) {
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok || u == nil {
 			return obj, nil

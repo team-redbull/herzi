@@ -12,9 +12,12 @@ import (
 // reader keeps the first malformed field error, including its full path. Missing
 // fields have zero values; Kubernetes admission validates required field presence.
 type reader struct {
-	object map[string]interface{}
+	object map[string]any
 	err    error
 }
+
+// replicasPath is the field path of a NodePool's desired size.
+var replicasPath = []string{"spec", "replicas"}
 
 func newReader(u *unstructured.Unstructured) *reader {
 	r := &reader{}
@@ -59,25 +62,25 @@ func (r *reader) stringMap(path ...string) map[string]string {
 	r.fail(path, err)
 	return v
 }
-func (r *reader) objectAt(path ...string) map[string]interface{} {
+func (r *reader) objectAt(path ...string) map[string]any {
 	if !r.exists(path...) {
 		return nil
 	}
 	raw, _, err := unstructured.NestedFieldNoCopy(r.object, path...)
 	r.fail(path, err)
-	value, ok := raw.(map[string]interface{})
+	value, ok := raw.(map[string]any)
 	if !ok {
 		r.fail(path, fmt.Errorf("must be an object, got %T", raw))
 	}
 	return value
 }
-func (r *reader) slice(path ...string) []interface{} {
+func (r *reader) slice(path ...string) []any {
 	if !r.exists(path...) {
 		return nil
 	}
 	raw, _, err := unstructured.NestedFieldNoCopy(r.object, path...)
 	r.fail(path, err)
-	value, ok := raw.([]interface{})
+	value, ok := raw.([]any)
 	if !ok {
 		r.fail(path, fmt.Errorf("must be an array, got %T", raw))
 	}
@@ -116,7 +119,7 @@ func ParseNodePool(u *unstructured.Unstructured, now time.Time) (NodePool, error
 	v := NodePool{Name: r.str("metadata", "name"), Namespace: r.str("metadata", "namespace"), PlatformType: r.str("spec", "platform", "type"), Deleting: r.deleting()}
 	if r.exists("spec", "replicas") {
 		raw, _, err := unstructured.NestedFieldNoCopy(r.object, "spec", "replicas")
-		r.fail([]string{"spec", "replicas"}, err)
+		r.fail(replicasPath, err)
 		var n int64
 		switch x := raw.(type) {
 		case int32:
@@ -125,15 +128,15 @@ func ParseNodePool(u *unstructured.Unstructured, now time.Time) (NodePool, error
 			n = x
 		case float64:
 			if math.IsNaN(x) || math.IsInf(x, 0) || math.Trunc(x) != x || x < math.MinInt32 || x > math.MaxInt32 {
-				r.fail([]string{"spec", "replicas"}, fmt.Errorf("must be an int32 integer"))
+				r.fail(replicasPath, fmt.Errorf("must be an int32 integer"))
 			} else {
 				n = int64(x)
 			}
 		default:
-			r.fail([]string{"spec", "replicas"}, fmt.Errorf("must be an integer, got %T", raw))
+			r.fail(replicasPath, fmt.Errorf("must be an integer, got %T", raw))
 		}
 		if n < math.MinInt32 || n > math.MaxInt32 {
-			r.fail([]string{"spec", "replicas"}, fmt.Errorf("outside int32 range"))
+			r.fail(replicasPath, fmt.Errorf("outside int32 range"))
 		}
 		if r.err == nil {
 			replicas := int32(n)
@@ -156,7 +159,7 @@ func ParseAgent(u *unstructured.Unstructured) (Agent, error) {
 	v := Agent{Name: r.str("metadata", "name"), Namespace: r.str("metadata", "namespace"), Labels: r.stringMap("metadata", "labels"), Approved: r.boolean("spec", "approved"), Bound: r.reference("spec", "clusterDeploymentName"), State: r.str("status", "debugInfo", "state"), Deleting: r.deleting(), CreatedAt: r.timestamp("metadata", "creationTimestamp")}
 	for i, raw := range r.slice("status", "conditions") {
 		path := []string{fmt.Sprintf("status.conditions[%d]", i)}
-		m, ok := raw.(map[string]interface{})
+		m, ok := raw.(map[string]any)
 		if !ok {
 			r.fail(path, fmt.Errorf("must be an object"))
 			continue

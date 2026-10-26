@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -44,7 +44,7 @@ func (c Config) Validate() error {
 	for name := range poolErrors {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	for _, name := range names {
 		problems = append(problems, poolErrors[name])
 	}

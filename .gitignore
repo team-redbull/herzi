@@ -32,3 +32,5 @@ go.work
 # local agent tooling
 .claude-flow/
 .swarm/
+agentdb.rvf
+agentdb.rvf.lock

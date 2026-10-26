@@ -151,7 +151,7 @@ func TestAttributeSlotsAndDeterminism(t *testing.T) {
 	equal(t, len(f.Closed), 5)
 	equal(t, f.Open[0].Slot, 5)
 	equal(t, f.Closed[0].Slot, 1)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		equal(t, Attribute(raw, settings{poolConfig()}), all)
 	}
 	// Slice inputs are never sorted or changed in place.
@@ -170,7 +170,7 @@ func TestSnapshotSafetyInvariants(t *testing.T) {
 	t.Run("unclear POST annotation survives reconstruction and expires at boundary", func(t *testing.T) {
 		raw := snapshot()
 		raw.InfraEnvs[0].Annotations = map[string]string{kube.AnnotationBlockedUntil: raw.At.Add(5 * time.Minute).Format(time.RFC3339)}
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			facts := Attribute(raw, settings{poolConfig()})
 			equal(t, Validate(facts["a"], raw, poolConfig()).Blocked, true)
 		}
@@ -205,7 +205,7 @@ func TestSnapshotSafetyInvariants(t *testing.T) {
 		raw.Agents = []kube.Agent{agent()}
 		s := settings{poolConfig()}
 		before := Attribute(raw, s)
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			f := Attribute(raw, s)["a"]
 			_ = Validate(f, raw, s.p)
 			if g, ok := Decide(f, s.p, raw.At).(Grow); ok {

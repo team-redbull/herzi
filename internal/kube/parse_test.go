@@ -125,7 +125,7 @@ func TestMissingAndNil(t *testing.T) {
 			t.Fatal("nil must fail")
 		}
 	}
-	for _, u := range []*unstructured.Unstructured{{}, {Object: map[string]interface{}{"metadata": map[string]interface{}{"deletionTimestamp": nil}, "spec": map[string]interface{}{"approved": nil}}}} {
+	for _, u := range []*unstructured.Unstructured{{}, {Object: map[string]any{"metadata": map[string]any{"deletionTimestamp": nil}, "spec": map[string]any{"approved": nil}}}} {
 		for _, err := range parseAll(u) {
 			if err != nil {
 				t.Fatal(err)
@@ -136,21 +136,21 @@ func TestMissingAndNil(t *testing.T) {
 func TestMalformedFields(t *testing.T) {
 	cases := []struct {
 		path   string
-		value  interface{}
+		value  any
 		parser int
 	}{
-		{"metadata.name", true, 0}, {"metadata.namespace", true, 1}, {"metadata.labels", []interface{}{}, 0}, {"metadata.labels", map[string]interface{}{"x": true}, 0}, {"metadata.annotations", false, 2},
+		{"metadata.name", true, 0}, {"metadata.namespace", true, 1}, {"metadata.labels", []any{}, 0}, {"metadata.labels", map[string]any{"x": true}, 0}, {"metadata.annotations", false, 2},
 		{"metadata.creationTimestamp", 42.0, 0}, {"metadata.creationTimestamp", "invalid", 0}, {"metadata.deletionTimestamp", false, 2}, {"metadata.deletionTimestamp", "invalid", 1},
 		{"spec.approved", "true", 0}, {"spec.clusterDeploymentName", "tenant", 0}, {"spec.clusterDeploymentName.name", true, 0}, {"spec.clusterDeploymentName.namespace", true, 0},
 		{"spec.clusterRef", false, 2}, {"spec.clusterRef.name", 42.0, 2}, {"status.debugInfo.state", true, 0}, {"status.conditions", false, 0},
-		{"status.conditions", []interface{}{false}, 0}, {"status.conditions", []interface{}{map[string]interface{}{"type": true}}, 0},
-		{"status.conditions", []interface{}{map[string]interface{}{"status": false}}, 0}, {"status.conditions", []interface{}{map[string]interface{}{"lastTransitionTime": "invalid"}}, 0},
+		{"status.conditions", []any{false}, 0}, {"status.conditions", []any{map[string]any{"type": true}}, 0},
+		{"status.conditions", []any{map[string]any{"status": false}}, 0}, {"status.conditions", []any{map[string]any{"lastTransitionTime": "invalid"}}, 0},
 		{"spec.replicas", "4", 1}, {"spec.replicas", 1.5, 1}, {"spec.replicas", int64(math.MaxInt32) + 1, 1}, {"spec.replicas", float64(math.MaxInt32) + 1, 1}, {"spec.replicas", math.NaN(), 1},
 		{"spec.autoScaling", true, 1}, {"spec.platform.type", true, 1}, {"spec.platform.agent.agentLabelSelector.matchLabels", false, 1}, {"spec.platform.agent.agentLabelSelector.matchExpressions", false, 1}, {"spec.pausedUntil", true, 1},
 	}
 	for i, tc := range cases {
 		t.Run(fmt.Sprintf("%d/%s", i, tc.path), func(t *testing.T) {
-			u := &unstructured.Unstructured{Object: map[string]interface{}{}}
+			u := &unstructured.Unstructured{Object: map[string]any{}}
 			if err := unstructured.SetNestedField(u.Object, tc.value, strings.Split(tc.path, ".")...); err != nil {
 				t.Fatal(err)
 			}
@@ -161,7 +161,7 @@ func TestMalformedFields(t *testing.T) {
 		})
 	}
 	// Mistyped intermediate containers must also report a path.
-	u := &unstructured.Unstructured{Object: map[string]interface{}{"metadata": false, "spec": false, "status": false}}
+	u := &unstructured.Unstructured{Object: map[string]any{"metadata": false, "spec": false, "status": false}}
 	for _, err := range parseAll(u) {
 		if err == nil || !strings.Contains(err.Error(), "metadata.name") {
 			t.Fatal(err)
@@ -169,22 +169,22 @@ func TestMalformedFields(t *testing.T) {
 	}
 }
 func TestParserBoundaries(t *testing.T) {
-	for _, value := range []interface{}{int32(4), int64(0), int64(math.MaxInt32), int64(math.MinInt32), float64(4)} {
-		u := &unstructured.Unstructured{Object: map[string]interface{}{"spec": map[string]interface{}{"replicas": value}}}
+	for _, value := range []any{int32(4), int64(0), int64(math.MaxInt32), int64(math.MinInt32), float64(4)} {
+		u := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"replicas": value}}}
 		n, err := ParseNodePool(u, testNow)
 		if err != nil || n.Replicas == nil {
 			t.Fatalf("%v %v", n, err)
 		}
 	}
 	for _, paused := range []string{"", "false", "invalid", testNow.Format(time.RFC3339), testNow.Add(time.Nanosecond).Format(time.RFC3339Nano), "true"} {
-		u := &unstructured.Unstructured{Object: map[string]interface{}{"spec": map[string]interface{}{"pausedUntil": paused}}}
+		u := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"pausedUntil": paused}}}
 		n, err := ParseNodePool(u, testNow)
 		if err != nil || n.Paused != (paused == "true" || strings.Contains(paused, ".000000001")) {
 			t.Fatalf("%s: %v %v", paused, n, err)
 		}
 	}
 	for _, name := range []string{"", "tenant"} {
-		u := &unstructured.Unstructured{Object: map[string]interface{}{"spec": map[string]interface{}{"clusterRef": map[string]interface{}{"name": name}, "clusterDeploymentName": map[string]interface{}{"name": name}, "autoScaling": map[string]interface{}{}}}}
+		u := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"clusterRef": map[string]any{"name": name}, "clusterDeploymentName": map[string]any{"name": name}, "autoScaling": map[string]any{}}}}
 		a, err := ParseAgent(u)
 		if err != nil || a.Bound != (name != "") {
 			t.Fatal(a, err)
@@ -200,11 +200,11 @@ func TestParserBoundaries(t *testing.T) {
 	}
 	// Newest transition wins regardless of condition order or connection status,
 	// even when the newest transition is older than creation time.
-	for _, conditions := range [][]interface{}{
-		{map[string]interface{}{"type": "Connected", "status": "False", "lastTransitionTime": "2026-10-25T08:00:00Z"}, map[string]interface{}{"type": "Other", "status": "True", "lastTransitionTime": "2026-10-25T09:00:00Z"}},
-		{map[string]interface{}{"lastTransitionTime": "2026-10-25T09:00:00Z"}, map[string]interface{}{"lastTransitionTime": "2026-10-25T08:00:00Z"}},
+	for _, conditions := range [][]any{
+		{map[string]any{"type": "Connected", "status": "False", "lastTransitionTime": "2026-10-25T08:00:00Z"}, map[string]any{"type": "Other", "status": "True", "lastTransitionTime": "2026-10-25T09:00:00Z"}},
+		{map[string]any{"lastTransitionTime": "2026-10-25T09:00:00Z"}, map[string]any{"lastTransitionTime": "2026-10-25T08:00:00Z"}},
 	} {
-		u := &unstructured.Unstructured{Object: map[string]interface{}{"metadata": map[string]interface{}{"creationTimestamp": "2026-10-26T08:00:00Z"}, "status": map[string]interface{}{"conditions": conditions}}}
+		u := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"creationTimestamp": "2026-10-26T08:00:00Z"}, "status": map[string]any{"conditions": conditions}}}
 		a, err := ParseAgent(u)
 		if err != nil || a.Connected || a.LastStateChange.Format(time.RFC3339) != "2026-10-25T09:00:00Z" {
 			t.Fatal(a, err)
@@ -236,7 +236,7 @@ func TestTransform(t *testing.T) {
 			}
 		}
 	}
-	for _, obj := range []interface{}{nil, (*unstructured.Unstructured)(nil), "other", NewUnstructured(NodePoolGVK), NewUnstructured(InfraEnvGVK)} {
+	for _, obj := range []any{nil, (*unstructured.Unstructured)(nil), "other", NewUnstructured(NodePoolGVK), NewUnstructured(InfraEnvGVK)} {
 		got, err := transform(obj)
 		if err != nil || got != obj {
 			t.Fatal(got, err)
@@ -244,9 +244,9 @@ func TestTransform(t *testing.T) {
 	}
 	other := NewUnstructured(AgentGVK)
 	other.SetKind("Other")
-	other.Object["metadata"] = map[string]interface{}{"managedFields": []interface{}{"keep"}}
+	other.Object["metadata"] = map[string]any{"managedFields": []any{"keep"}}
 	before := other.DeepCopy()
-	transform(other)
+	_, _ = transform(other)
 	if !reflect.DeepEqual(before, other) {
 		t.Fatal("changed other type")
 	}
@@ -259,13 +259,13 @@ func TestNonJSONMistypedFieldsDoNotPanic(t *testing.T) {
 	// NestedMap/NestedSlice deep-copy their contents and panic on non-JSON Go
 	// values. Parsers inspect nested containers without invoking that copy.
 	cases := []struct {
-		object map[string]interface{}
+		object map[string]any
 		parser int
 		path   string
 	}{
-		{map[string]interface{}{"spec": map[string]interface{}{"clusterDeploymentName": map[string]interface{}{"name": int32(1)}}}, 0, "spec.clusterDeploymentName.name"},
-		{map[string]interface{}{"spec": map[string]interface{}{"clusterRef": map[string]interface{}{"name": int32(1)}}}, 2, "spec.clusterRef.name"},
-		{map[string]interface{}{"status": map[string]interface{}{"conditions": []interface{}{map[string]interface{}{"type": int32(1)}}}}, 0, "status.conditions[0]"},
+		{map[string]any{"spec": map[string]any{"clusterDeploymentName": map[string]any{"name": int32(1)}}}, 0, "spec.clusterDeploymentName.name"},
+		{map[string]any{"spec": map[string]any{"clusterRef": map[string]any{"name": int32(1)}}}, 2, "spec.clusterRef.name"},
+		{map[string]any{"status": map[string]any{"conditions": []any{map[string]any{"type": int32(1)}}}}, 0, "status.conditions[0]"},
 	}
 	for _, tc := range cases {
 		err := parseAll(&unstructured.Unstructured{Object: tc.object})[tc.parser]
