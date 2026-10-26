@@ -56,9 +56,19 @@ type PoolOverride struct {
 	Paused             *bool          `json:"paused,omitempty"`
 }
 
-// Config is the whole file. The methods (ForPool, Manages, Validate, Load) live in other files of this package.
+// Config is the whole file. The hub settings sit at the TOP LEVEL of the YAML (HubConfig is embedded),
+// followed by `defaults` and `pools`:
+//
+//	interval: 120s
+//	hubName: ocp4-bat-yam-01
+//	defaults: {lowPct: 15, ...}
+//	pools: {"32-128-zone-1": {minFree: 5}}
+//
+// Durations are strings ("20m"). The methods (ForPool, Manages, Validate) and the strict loader
+// live in other files of this package; the json tags here describe field NAMES only, because
+// time.Duration does not unmarshal from "20m" by itself.
 type Config struct {
-	Hub      HubConfig               `json:"hub"`
+	HubConfig
 	Defaults PoolConfig              `json:"defaults"`
 	Pools    map[string]PoolOverride `json:"pools"` // keyed by InfraEnv name; presence == managed
 }
