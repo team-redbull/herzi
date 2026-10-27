@@ -1,3 +1,5 @@
+> **Historical verification record; add-only addendum.** The safety contracts below remain applicable. Fixture arithmetic has since changed: demand 10 targets 13 (three additions at supply 10), demand 50 targets 65. Obsolete minBand fixtures must now use a supported invalid setting such as highPct: -1; removed keys reject the entire document. The former ceiling/removal behavior is retired. The current alert requires explicit vector matching: `herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds`. See the [current design](../design/herzi-design.md). Recorded tests/results below refer to the original round-2 revision.
+
 # Independent review round 2: implementation and verification
 
 Scope: internal packages, design, plan, and this report. No git commands, dependency changes,

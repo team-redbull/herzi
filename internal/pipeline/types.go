@@ -151,18 +151,13 @@ type Grow struct {
 	Need int
 	Mode Mode
 }
-type WouldRemove struct {
-	Key                             PoolKey
-	Surplus, Total, Target, Ceiling int
-}
 type Hold struct {
 	Key    PoolKey
 	Reason string
 }
 
-func (Grow) isIntent()        {}
-func (WouldRemove) isIntent() {}
-func (Hold) isIntent()        {}
+func (Grow) isIntent() {}
+func (Hold) isIntent() {}
 
 // InstallRequest is one POST to the install-server route. Count is 1..20 (a hard API limit).
 type InstallRequest struct {

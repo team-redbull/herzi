@@ -91,7 +91,8 @@ func TestF6LazyAcquisitionProofAndCache(t *testing.T) {
 			e.WorkflowExecutionInfo.StartTime = timestamppb.New(now.Add(-3 * time.Minute))
 			return e, nil
 		},
-		history: func(ctx context.Context, _ string, run string, long bool, filter enumspb.HistoryEventFilterType) client.HistoryEventIterator {
+		history: func(ctx context.Context, id string, run string, long bool, filter enumspb.HistoryEventFilterType) client.HistoryEventIterator {
+			require.Equal(t, "install-server-ocp4-hub_p_1", id)
 			calls.Add(1)
 			require.Equal(t, "probe", run)
 			require.False(t, long)
@@ -104,7 +105,7 @@ func TestF6LazyAcquisitionProofAndCache(t *testing.T) {
 			return &fakeHistory{events: acquisitionEvents("resolve_segment")}
 		},
 	}
-	s := NewSweeper(Options{Client: f, MaxSlots: 1, Now: func() time.Time { return now }})
+	s := NewSweeper(Options{Client: f, MCE: "ocp4-hub", MaxSlots: 1, Now: func() time.Time { return now }})
 	r := s.SweepWithState(t.Context(), "p", pipeline.State{}, p)
 	require.False(t, r.Slots[0].Acquired)
 	require.Zero(t, calls.Load())

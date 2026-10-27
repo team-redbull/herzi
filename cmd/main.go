@@ -99,6 +99,7 @@ func startupBoundChanged(old, current config.HubConfig) []string {
 	add("agentNamespace", old.AgentNamespace != current.AgentNamespace)
 	add("installURL", old.InstallURL != current.InstallURL)
 	add("maxSlots", old.MaxSlots != current.MaxSlots)
+	add("stuckAfter", old.StuckAfter != current.StuckAfter)
 	add("temporalAddress", old.TemporalAddress != current.TemporalAddress)
 	add("temporalNamespace", old.TemporalNamespace != current.TemporalNamespace)
 	add("activityQueue", old.ActivityQueue != current.ActivityQueue)
@@ -261,7 +262,11 @@ func reloadHandler(
 		if err != nil {
 			m.SetConfigValid(false)
 			// Config decoder errors may include arbitrary YAML scalar values.
-			logger.Error(errors.New("invalid configuration"),
+			diagnostic := errors.New("invalid configuration")
+			if migration, ok := errors.AsType[*config.RemovedKeyError](err); ok {
+				diagnostic = migration
+			}
+			logger.Error(diagnostic,
 				"Configuration update rejected, keeping the last good configuration", "path", path)
 			return
 		}

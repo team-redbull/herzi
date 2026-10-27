@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"reflect"
-	"testing"
 	"time"
 
 	"github.com/team-redbull/herzi/internal/config"
@@ -11,7 +10,7 @@ import (
 
 func clockTime() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
 func poolConfig() config.PoolConfig {
-	return config.PoolConfig{LowPct: 15, HighPct: 30, MinFree: 2, MinBand: 1, MaxOpenRunsPerPool: 15, ProbeInterval: 20 * time.Minute, DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour}
+	return config.PoolConfig{HighPct: 30, MinFree: 2, MaxOpenRunsPerPool: 15, ProbeInterval: 20 * time.Minute, DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour}
 }
 
 type settings struct{ p config.PoolConfig }
@@ -28,7 +27,10 @@ func nodePool() kube.NodePool {
 func agent() kube.Agent {
 	return kube.Agent{Name: "agent", Labels: map[string]string{kube.LabelInfraEnv: "a"}, Approved: true, Connected: true, State: kube.StateKnownUnbound, LastStateChange: clockTime().Add(-time.Minute)}
 }
-func equal(t *testing.T, got, want any) {
+func equal(t interface {
+	Helper()
+	Fatalf(string, ...any)
+}, got, want any) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v; want %#v", got, want)

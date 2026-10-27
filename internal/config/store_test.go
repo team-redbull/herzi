@@ -65,14 +65,15 @@ func TestStoreLastGoodAndValid(t *testing.T) {
 func TestStoreOwnsInitial(t *testing.T) {
 	initial := validConfig(t)
 	initial.Pools = map[string]config.PoolOverride{"test": {
-		LowPct: new(15), HighPct: new(30), MinFree: new(2), MinBand: new(1), MaxOpenRunsPerPool: new(15),
+		HighPct: new(30), MinFree: new(2), MaxOpenRunsPerPool: new(15),
 		ProbeInterval: ptr(20 * time.Minute), DrawGrace: ptr(2 * time.Minute), FailureMemory: ptr(6 * time.Hour), SettlingMax: ptr(time.Hour),
 		DryRunGrow: new(false), Paused: new(false),
 	}, "empty": {}}
 	s := config.NewStore(initial)
 	*initial.Pools["test"].MinFree = 999
+	*initial.Pools["test"].HighPct = 999
 	delete(initial.Pools, "empty")
-	if s.Snapshot().ForPool("test").MinFree != 2 || !s.Snapshot().Manages("empty") {
+	if s.Snapshot().ForPool("test").HighPct != 30 || s.Snapshot().ForPool("test").MinFree != 2 || !s.Snapshot().Manages("empty") {
 		t.Fatal("initial config aliases store")
 	}
 }
@@ -114,5 +115,29 @@ func TestStoreConcurrentSnapshotUpdate(t *testing.T) {
 	}
 	if !s.Valid() {
 		t.Fatal("final successful update must be valid")
+	}
+}
+
+func TestRemovedKeysKeepLastGoodConfig(t *testing.T) {
+	s := config.NewStore(validConfig(t))
+	good := []byte(minimal + "pools: {test: {minFree: 5}}\n")
+	if err := s.Update(good); err != nil {
+		t.Fatal(err)
+	}
+	before := s.Snapshot()
+	for _, suffix := range []string{"defaults: {lowPct: null}", "defaults: {minBand: 0}", "pools: {test: {lowPct: 15}}", "pools: {test: {minBand: null}}"} {
+		requireError(t, s.Update([]byte(minimal+suffix)), "was removed")
+		if s.Valid() {
+			t.Fatal("obsolete document accepted")
+		}
+		if diff := cmp.Diff(before, s.Snapshot()); diff != "" {
+			t.Fatal(diff)
+		}
+	}
+	if err := s.Update(good); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Valid() {
+		t.Fatal("last-good retry rejected")
 	}
 }

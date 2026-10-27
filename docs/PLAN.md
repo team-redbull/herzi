@@ -3,12 +3,52 @@
 herzi is the **inventory controller**: it keeps each InfraEnv's pool of spare machines matched to
 HyperShift NodePool demand by calling the workflows `install-server` API. The full specification is
 [`design/herzi-design.md`](design/herzi-design.md) (Part 1 logic with examples, Part 2 pseudocode, Part 3
-flaws and edge cases) and [`design/inventory-controller-original.md`](design/inventory-controller-original.md).
+flaws and edge cases) with [`design/inventory-controller-original.md`](design/inventory-controller-original.md) retained as historical input.
 **The design document is the source of truth; if the code and the design disagree, fix one of them on purpose.**
 
 ## Scope of v1
-Grow is real. Shrink is **log-only** ("WOULD REMOVE"). The cooldown, real shrink, VM creation and an
-idempotency key on the route are in the design's backlog and are NOT built.
+The controller permanently only adds servers. Capacity is never reclaimed: lowering demand or
+the buffer only stops additions. VM creation, orphan-binding detection and install-route
+idempotency remain backlog items.
+
+```text
+buffer = max(minFree, (highPct*demand + 50)/100)  # integer half-up rounding
+target = demand + buffer
+need   = target - (assigned + claimable + settling + open)
+```
+
+With valid observations and an unblocked pool, positive need enters Full/Probe growth.
+At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
+before considering failures or probes. Capacity is never reclaimed: lowering demand or
+the buffer only stops additions. Spare capacity can persist indefinitely.
+
+With `highPct: 30` and `minFree: 2`:
+
+| Demand | Rounded percentage | Buffer | Target |
+|---:|---:|---:|---:|
+| 0 | 0 | 2 | 2 |
+| 4 | 1 | 2 | 6 |
+| 6 | 2 | 2 | 8 |
+| 10 | 3 | 3 | 13 |
+| 12 | 4 | 4 | 16 |
+| 20 | 6 | 6 | 26 |
+| 50 | 15 | 15 | 65 |
+
+The default target buffer intentionally doubles from 15% to 30%: demand 20 previously
+had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
+to retain the old target behavior. The `minFree` floor still protects small pools.
+
+Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
+are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
+after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
+are outside pool accounting. The authoritative builders are
+`/home/toto/code/workflows/shared/workflow_ids.py`.
+
+Runs started before the workflows PR keep their previous IDs and are not accounted
+for by this controller. Start every pool in dry run. Enable real growth
+(`dryRunGrow: false`) only after verifying in Temporal that no previous-ID install
+runs are still open. There is no automatic multi-family accounting.
+
 
 ## Decisions already made (do not reopen)
 - Go, Kubebuilder scaffold, controller-runtime, **no CRD of our own**.
@@ -17,7 +57,7 @@ idempotency key on the route are in the design's backlog and are NOT built.
 - A NodePool selects ONLY by the InfraEnv label; anything else blocks that pool.
 - All Agents on the hub are auto-approved. Disk wipe on release happens before an Agent registers.
 - Leader election ON. One reconcile per key. Pools reconcile in parallel (`MaxConcurrentReconciles` 4).
-- Workflow ids: `add-server-to-mce_<mce>_<infraenv>_<slot>` (see `internal/ids`).
+- Workflow ids: `install-server-<mce>_<infraEnv>_<slot>`; named `install-server-<mce>_<lowercased-server>` (see `internal/ids`).
 - Probe mode: one machine every 20 min while hardware looks missing.
 
 ## Architecture
@@ -68,13 +108,12 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `herzi_pool_demand` / `_assigned` / `_claimable` / `_settling` / `_stuck_agents` / `_open_runs` | gauge | pool | the counted terms |
-| `herzi_pool_target` / `_ceiling` / `_need` | gauge | pool | the formula outputs |
+| `herzi_pool_target` / `_need` | gauge | pool | the formula outputs |
 | `herzi_pool_blocked` | gauge 0/1 | pool, reason | pool blocked this pass |
 | `herzi_pool_probe_mode` | gauge 0/1 | pool | hardware looks missing |
 | `herzi_pool_failure_class` | gauge 0/1 | pool, class (`capacity`,`other`,`unknown`) | last failure class |
 | `herzi_orders_total` | counter | pool, mode (`full`,`probe`), result (`started`,`short`,`ambiguous`,`rejected`,`dry_run`) | install requests |
 | `herzi_machines_ordered_total` | counter | pool | machines requested |
-| `herzi_would_remove_total` | counter | pool | shrink log lines |
 | `herzi_reconcile_duration_seconds` | histogram | — | per reconcile |
 | `herzi_sweep_duration_seconds` | histogram | — | per pool sweep |
 | `herzi_stuck_after_seconds` | gauge | none | startup-configured open-run alert threshold in seconds (process constant) |
@@ -111,4 +150,28 @@ Semantic pool configuration errors publish with other changes and use
 `failureMemory >= 2*probeInterval`, `drawGrace < probeInterval`,
 `settlingMax >= probeInterval`, and `interval <= probeInterval` for defaults and every pool.
 Acquisition proof uses a completed `acquire_servers` activity, read lazily from run-pinned history.
-The alert compares `herzi_oldest_open_run_seconds > herzi_stuck_after_seconds`.
+The alert compares `herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds`.
+
+The state annotation survives slot reuse and restarts; running recovery proof requires a
+post-failure start, age >= drawGrace and completed acquire_servers (or post-failure workflow
+completion). Unknown failed history exports class="unknown" and prevents Full spending.
+The pending marker is written BEFORE each POST with an independent bounded context;
+prewrite failure prevents POST. Definite parsed outcomes clear it with JSON null;
+ambiguous/rejected outcomes extend it from outcome time. Failed clear leaves it to expire.
+
+### Configuration migration
+
+Delete `lowPct` and `minBand` from both `defaults` and every pool override, even if
+set to zero or null. They are rejected with field-path migration diagnostics, for example:
+
+```text
+defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct
+pools.<name>.minBand was removed: the controller no longer has a ceiling; delete minBand
+```
+
+These are document/schema errors: startup fails, and a reload rejects the entire update,
+retaining the last good configuration. Invalid values of supported keys in merged pools
+instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
+Deploy the migrated config with the new image. Rollback requires the matching old config
+as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
+`highPct: 15` explicitly for the former target buffer; the new default remains 30.

@@ -1,5 +1,5 @@
 # Design Part 2: "Alert by failure type (metrics, not decisions)".
-# Fixed operational thresholds; adjust alongside config interval/stuckAfter if changed.
+# Fixed alert durations; open-run age uses the startup-configured threshold gauge.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -65,12 +65,12 @@ spec:
           supply.
         runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#stuck-agents
     - alert: HerziStuckOpenRuns
-      expr: herzi_oldest_open_run_seconds > 7200
+      expr: herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds
       for: 5m
       labels:
         severity: warning
       annotations:
-        summary: Pool {{ $labels.pool }} has an install open longer than two hours
+        summary: Pool {{ $labels.pool }} has an install open beyond the configured stuck threshold
         description: Open runs remain counted as supply; inspect Temporal history
           and worker activity.
         runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#stuck-open-runs

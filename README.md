@@ -18,8 +18,9 @@ and preserves the last good snapshot when an update cannot be parsed.
 
 ## Status
 
-**v1 shrink is log-only (`WOULD REMOVE`).** Growing is real; VM creation, the
-cooldown, real shrink and an idempotency key on the install route are backlog items.
+**Permanently add-only:** herzi only adds servers. Capacity is never reclaimed;
+lowering demand or the buffer only stops additions. VM creation, orphan-binding
+detection and an idempotency key on the install route remain backlog items.
 
 The controller, metrics, manager wiring, RBAC and packaging are implemented and tested:
 unit tests, an envtest suite against a real kube-apiserver, `golangci-lint` and
@@ -111,19 +112,17 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | installURL | Required/site-specific | Hub | Full /workflows/server-lifecycle/install-server route |
 | maxSlots | 100 | Hub | Must equal the API route slot range |
 | ambiguousWait | 5m | Hub | Persisted block after an unclear POST |
-| stuckAfter | 2h | Hub | Open-run warning age; shipped alert fixed at 2h |
+| stuckAfter | 2h | Hub | Startup open-run warning age; exported as herzi_stuck_after_seconds; restart to change |
 | temporalAddress | Required/site-specific | Hub | Temporal host:port (plain gRPC unless the TLS component is used) |
 | temporalNamespace | default | Hub | Temporal namespace |
 | activityQueue | server-lifecycle-activity-<hubName> | Hub | Hub activity queue, derived from hubName when not written |
 | workflowQueue | install-server-workflow | Hub | Install workflow queue |
 | segmentQueue | segment-lifecycle-activity | Hub | Segment activity queue |
-| lowPct | 15 | Pool | Lower spare percentage, integer half-up rounding |
-| highPct | 30 | Pool | Upper spare percentage |
-| minFree | 2 | Pool | Lower spare floor; include Replace upgrade surge |
-| minBand | 1 | Pool | Minimum band between target and ceiling |
+| highPct | 30 | Pool | Single target buffer percentage, integer half-up rounding |
+| minFree | 2 | Pool | Minimum spare buffer; include Replace upgrade surge |
 | maxOpenRunsPerPool | 15 | Pool | Concurrent install load cap, at most maxSlots |
 | probeInterval | 20m | Pool | Minimum interval between capacity probes |
-| drawGrace | 2m | Pool | Running-after-failure proof of new hardware |
+| drawGrace | 2m | Pool | Minimum age of a post-failure Running run with completed acquire_servers |
 | failureMemory | 6h | Pool | Closed failure evidence window |
 | settlingMax | 60m | Pool | Unclaimable Agent settling allowance |
 | dryRunGrow | false | Pool | Log WOULD INSTALL without posting |
@@ -133,10 +132,48 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 
 See the complete [sample](config/samples/herzi-config.yaml), including all Temporal
 fields in the shared config contract. TLS paths and API bearer token are supplied
-via Secret mounts/environment, not YAML. A pool can also be paused with
-`herzi.redbull.io/paused: "true"`; `herzi.redbull.io/blocked-until` persists the
-ambiguous-request wait on its InfraEnv. See [operations](docs/ops/operating.md)
-for strict loading, override validation, rollout, upgrades, rollback and lease loss.
+via Secret mounts/environment, not YAML. `maxSlots` must equal 100. Validate
+`highPct >= 0`, `minFree >= 0`, `1 <= maxOpenRunsPerPool <= 100`, positive durations,
+`failureMemory >= 2*probeInterval`, `interval <= probeInterval`,
+`settlingMax >= probeInterval`, and `drawGrace < probeInterval`, for defaults and merged pools.
+
+A pool can also be paused with `herzi.redbull.io/paused: "true"`.
+`herzi.redbull.io/state` stores bounded durable failure/probe evidence;
+`herzi.redbull.io/blocked-until` is written BEFORE every POST, cleared with JSON null
+after a definite parsed outcome, and extended from outcome time for ambiguous/rejected
+outcomes. Failure to prewrite prevents the POST; failed clear leaves expiry protection.
+Running recovery proof requires post-failure start, age >= drawGrace, and completed
+`acquire_servers`; completion of a post-failure workflow also proves recovery.
+Unreadable failed history is `class="unknown"` and prevents Full spending.
+See [operations](docs/ops/operating.md) for durable state and strict loading.
+
+Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
+are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
+after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
+are outside pool accounting. The authoritative builders are
+`/home/toto/code/workflows/shared/workflow_ids.py`.
+
+Runs started before the workflows PR keep their previous IDs and are not accounted
+for by this controller. Start every pool in dry run. Enable real growth
+(`dryRunGrow: false`) only after verifying in Temporal that no previous-ID install
+runs are still open. There is no automatic multi-family accounting.
+
+### Configuration migration
+
+Delete `lowPct` and `minBand` from both `defaults` and every pool override, even if
+set to zero or null. They are rejected with field-path migration diagnostics, for example:
+
+```text
+defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct
+pools.<name>.minBand was removed: the controller no longer has a ceiling; delete minBand
+```
+
+These are document/schema errors: startup fails, and a reload rejects the entire update,
+retaining the last good configuration. Invalid values of supported keys in merged pools
+instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
+Deploy the migrated config with the new image. Rollback requires the matching old config
+as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
+`highPct: 15` explicitly for the former target buffer; the new default remains 30.
 
 ## Decision table
 
@@ -145,33 +182,69 @@ invalid selectors, early-bound/deleting pools, pause, opt-out, active ambiguity
 blocks and missing pollers prevent growth. The rows below describe the pure decision
 stage after successful validation; supply always includes open runs.
 
-Each row carries its own buffers (`low` / `high`), so it does not depend on the percentages.
-Columns: demand, assigned, claimable, settling, open, recent closed runs, then the expected intent.
+```text
+buffer = max(minFree, (highPct*demand + 50)/100)  # integer half-up rounding
+target = demand + buffer
+need   = target - (assigned + claimable + settling + open)
+```
 
-| demand | assigned | claimable | settling | open | recent | low / high | expect |
+With valid observations and an unblocked pool, positive need enters Full/Probe growth.
+At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
+before considering failures or probes. Capacity is never reclaimed: lowering demand or
+the buffer only stops additions. Spare capacity can persist indefinitely.
+
+With `highPct: 30` and `minFree: 2`:
+
+| Demand | Rounded percentage | Buffer | Target |
+|---:|---:|---:|---:|
+| 0 | 0 | 2 | 2 |
+| 4 | 1 | 2 | 6 |
+| 6 | 2 | 2 | 8 |
+| 10 | 3 | 3 | 13 |
+| 12 | 4 | 4 | 16 |
+| 20 | 6 | 6 | 26 |
+| 50 | 15 | 15 | 65 |
+
+The default target buffer intentionally doubles from 15% to 30%: demand 20 previously
+had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
+to retain the old target behavior. The `minFree` floor still protects small pools.
+
+Each custom-buffer row uses `highPct: 0, minFree: <buffer>`; the demand-50 row
+uses defaults (`highPct: 30, minFree: 2`). Probe rows use the default timings.
+Validation runs first; unmanaged or blocked pools never order.
+
+| demand | assigned | claimable | settling | open | recent evidence | buffer | expect |
 |---|---|---|---|---|---|---|---|
-| 20 | 18 | 3 | 0 | 0 | – | 2 / 4 | Grow 1 Full (21 < 22) |
-| 20 | 20 | 2 | 0 | 0 | – | 2 / 4 | Hold (22 = target) |
-| 20 | 20 | 6 | 0 | 0 | – | 2 / 4 | WouldRemove 4 (26 > 24, claimable 6) |
-| 20 | 18 | 3 | 0 | 1 | – | 2 / 4 | Hold (21 + 1 = 22) |
-| 20 | 20 | 6 | 0 | 2 | – | 2 / 4 | Hold (running > 0) |
-| 20 | 4 | 3 | 16 | 0 | – | 2 / 4 | Hold (supply 23 >= 22), no WouldRemove (settling) |
-| 12 | 4 | 3 | 16 | 0 | – | 2 / 4 | Hold (supply 23 >= 14) |
-| 0 | 0 | 0 | 0 | 0 | – | 2 / 3 managed | Grow 2 Full (seed) |
-| 0 | 0 | 0 | 0 | 0 | – | not managed | Blocked (Validate), no order |
-| 6 | 0 | 0 | 0 | 0 | capacity fail 3 min ago, no proof | 2 / 3 | Hold "probe wait" |
-| 6 | 0 | 0 | 0 | 0 | capacity fail 21 min ago | 2 / 3 | Grow 1 Probe |
-| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 1 min ago | 2 / 3 | Hold "probe running" |
-| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 3 min ago | 2 / 3 | Grow 7 Full (proof) |
-| 10 | 4 | 0 | 0 | 6 | 4 capacity fails closed 10:00:20, the 6 runs started 10:00:00 | 2 / 3 | Hold "probe running" (no proof: started before the failure) |
-| 6 | 0 | 1 | 0 | 0 | capacity fail 30 min ago, run Completed 5 min ago, started after the fail | 2 / 3 | Grow 7 Full |
-| 6 | 0 | 0 | 0 | 0 | capacity fail 30 min ago, only a Completed run that started BEFORE it | 2 / 3 | Grow 1 Probe (not proof) |
-| 6 | 0 | 0 | 0 | 0 | 2 non-capacity fails, none since success | 2 / 3 | Grow 8 Full (needs 3 to probe) |
-| 6 | 0 | 0 | 0 | 0 | 3 non-capacity fails, none since success | 2 / 3 | Grow 1 Probe |
-| 50 | 0 | 0 | 0 | 0 | – | 8 / 15 | Grow 58 Full → Plan one request of 15 |
-| 9 | 12 | 0 | 0 | 0 | – | 2 / 3 | Hold; alert assigned > demand |
-| 6 | 6 | 3 | 0 | 0 | – | 2 / 3 | Hold (total 9 = ceiling 9 is not above it; boundary test) |
-| 6 | 6 | 4 | 0 | 0 | – | 2 / 3 | WouldRemove 2 (total 10 > ceiling 9; surplus = min(10 − 8, claimable 4) = 2) |
+| 20 | 18 | 3 | 0 | 0 | – | 2 | Grow 1 Full (target 22) |
+| 20 | 20 | 2 | 0 | 0 | – | 2 | Hold (at or above target) |
+| 20 | 20 | 6 | 0 | 0 | – | 2 | Hold (at or above target) |
+| 20 | 18 | 3 | 0 | 1 | – | 2 | Hold (supply 22) |
+| 20 | 20 | 6 | 0 | 2 | – | 2 | Hold (supply 28) |
+| 20 | 4 | 3 | 16 | 0 | – | 2 | Hold (supply 23) |
+| 12 | 4 | 3 | 16 | 0 | – | 2 | Hold (supply 23) |
+| 0 | 0 | 0 | 0 | 0 | – | 2 | Grow 2 Full (seed) |
+| 0 | 0 | 0 | 0 | 0 | unmanaged | 2 | Blocked (Validate) |
+| 6 | 0 | 0 | 0 | 0 | capacity fail 3 min ago, no proof | 2 | Hold "probe wait" |
+| 6 | 0 | 0 | 0 | 0 | capacity fail 21 min ago | 2 | Grow 1 Probe |
+| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 1 min ago | 2 | Hold "probe running" |
+| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 3 min ago, acquire_servers completed | 2 | Grow 7 Full |
+| 10 | 4 | 0 | 0 | 6 | capacity fails at 10:00:20; open work started 10:00:00 | 2 | Hold "probe wait" until scheduled probe; older open work does not suppress it |
+| 6 | 0 | 1 | 0 | 0 | capacity fail 30 min ago; Completed run started after failure | 2 | Grow 7 Full |
+| 6 | 0 | 0 | 0 | 0 | capacity fail 30 min ago; Completed run started before failure | 2 | Grow 1 Probe |
+| 6 | 0 | 0 | 0 | 0 | 2 distinct other failures since success | 2 | Grow 8 Full |
+| 6 | 0 | 0 | 0 | 0 | 3 distinct other failures since success | 2 | Grow 1 Probe |
+| 50 | 0 | 0 | 0 | 0 | – | 15 (default) | Grow 65 Full → Plan one request of 15 |
+| 9 | 12 | 0 | 0 | 0 | – | 2 | Hold; sustained assigned > demand alerts |
+| 6 | 6 | 1 | 0 | 0 | – | 2 | Grow 1 Full (target − 1) |
+| 6 | 6 | 2 | 0 | 0 | – | 2 | Hold (target equality) |
+| 6 | 6 | 3 | 0 | 0 | capacity/unknown/three-other failures | 2 | Hold (target + 1); no probe |
+| 6 | 6 | 4 | 0 | 0 | – | 2 | Hold (at or above target) |
+
+Additional coverage: zero buffer (`highPct: 0, minFree: 0`); exact-half rounding
+(demand 5, `highPct: 10, minFree: 0` gives target 6); and at/above target Holds
+for every supply composition, including failure evidence. Under defaults,
+demand 20 / assigned 18 / claimable 3 orders 5 toward target 26; even assigned 21
+with no other supply needs 5. More supply never increases the order count.
 
 
 ## Metrics
@@ -183,15 +256,15 @@ preceding `herzi_pool_` prefix (for example `_assigned` means `herzi_pool_assign
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `herzi_pool_demand` / `_assigned` / `_claimable` / `_settling` / `_stuck_agents` / `_open_runs` | gauge | pool | the counted terms |
-| `herzi_pool_target` / `_ceiling` / `_need` | gauge | pool | the formula outputs |
+| `herzi_pool_target` / `_need` | gauge | pool | the formula outputs |
 | `herzi_pool_blocked` | gauge 0/1 | pool, reason | pool blocked this pass |
 | `herzi_pool_probe_mode` | gauge 0/1 | pool | hardware looks missing |
-| `herzi_pool_failure_class` | gauge 0/1 | pool, class (`capacity`,`other`) | last failure class |
+| `herzi_pool_failure_class` | gauge 0/1 | pool, class (`capacity`,`other`,`unknown`) | last failure class |
 | `herzi_orders_total` | counter | pool, mode (`full`,`probe`), result (`started`,`short`,`ambiguous`,`rejected`,`dry_run`) | install requests |
 | `herzi_machines_ordered_total` | counter | pool | machines requested |
-| `herzi_would_remove_total` | counter | pool | shrink log lines |
 | `herzi_reconcile_duration_seconds` | histogram | — | per reconcile |
 | `herzi_sweep_duration_seconds` | histogram | — | per pool sweep |
+| `herzi_stuck_after_seconds` | gauge | none | Startup stuckAfter threshold in seconds; process constant |
 | `herzi_oldest_open_run_seconds` | gauge | pool | for the stuck-run alert |
 | `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`) | poller counts |
 | `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, ...) |

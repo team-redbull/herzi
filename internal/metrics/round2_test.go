@@ -29,7 +29,7 @@ func TestF5UnknownFailureMetric(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := New(reg)
 	m.ObservePool(pipeline.PoolFacts{Key: "p", Closed: []pipeline.SlotRun{{Status: pipeline.StatusFailed,
-		FailType: pipeline.FailUnknown, Closed: time.Now()}}}, pipeline.Verdict{}, pipeline.Hold{}, 2, 3, 2, time.Now())
+		FailType: pipeline.FailUnknown, Closed: time.Now()}}}, pipeline.Verdict{}, pipeline.Hold{}, 2, 2, time.Now())
 	families, err := reg.Gather()
 	require.NoError(t, err)
 	for _, f := range families {

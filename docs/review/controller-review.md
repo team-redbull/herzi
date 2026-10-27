@@ -1,3 +1,5 @@
+> **Historical review of a superseded revision.** Former shrink behavior is retired permanently. This report preserves review evidence, not current instructions; use the [current add-only design](../design/herzi-design.md) and [operating guide](../ops/operating.md).
+
 # WP6 adversarial review
 
 Scope: `internal/controller/`, `internal/metrics/`, `cmd/main.go`, and

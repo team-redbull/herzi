@@ -27,10 +27,8 @@ type HubConfig struct {
 
 // PoolConfig is the fully merged, concrete settings of ONE pool.
 type PoolConfig struct {
-	LowPct             int           `json:"lowPct"`
-	HighPct            int           `json:"highPct"`
+	HighPct            int           `json:"highPct"` // target buffer percentage
 	MinFree            int           `json:"minFree"`
-	MinBand            int           `json:"minBand"`
 	MaxOpenRunsPerPool int           `json:"maxOpenRunsPerPool"`
 	ProbeInterval      time.Duration `json:"probeInterval"`
 	DrawGrace          time.Duration `json:"drawGrace"`
@@ -43,10 +41,8 @@ type PoolConfig struct {
 // PoolOverride mirrors PoolConfig with pointers: nil means "not written, inherit the default",
 // so minFree: 0 and paused: false are real overrides.
 type PoolOverride struct {
-	LowPct             *int           `json:"lowPct,omitempty"`
 	HighPct            *int           `json:"highPct,omitempty"`
 	MinFree            *int           `json:"minFree,omitempty"`
-	MinBand            *int           `json:"minBand,omitempty"`
 	MaxOpenRunsPerPool *int           `json:"maxOpenRunsPerPool,omitempty"`
 	ProbeInterval      *time.Duration `json:"probeInterval,omitempty"`
 	DrawGrace          *time.Duration `json:"drawGrace,omitempty"`
@@ -61,7 +57,7 @@ type PoolOverride struct {
 //
 //	interval: 120s
 //	hubName: ocp4-bat-yam-01
-//	defaults: {lowPct: 15, ...}
+//	defaults: {highPct: 30, ...}
 //	pools: {"32-128-zone-1": {minFree: 5}}
 //
 // Durations are strings ("20m"). The methods (ForPool, Manages, Validate) and the strict loader

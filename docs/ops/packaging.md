@@ -1,3 +1,8 @@
+> **Current configuration supersedes this record:** there are now nine pool fields.
+> See [operating.md](operating.md#config-model) for current configuration and migration,
+> and the [runbook](runbook.md) / [alert rules](../../config/prometheus/herzi-alerts.yaml)
+> for startup-configured stuck-run alerting. Past validation below is preserved as recorded.
+
 > **Historical record.** This is the report of the packaging work package as it was delivered, before the
 > controller was wired. Statements about what "WP6 must still do" are out of date: the manager wiring, the
 > generated RBAC and the envtest suite now exist. Where this file disagrees with `README.md`,

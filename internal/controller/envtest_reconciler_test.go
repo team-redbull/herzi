@@ -112,7 +112,7 @@ var _ = Describe("Inventory watches", func() {
 		DeferCleanup(func() { stop(); Eventually(done).Should(Receive(BeNil())) })
 		Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
 
-		// Two claimable Agents, demand 4: target 4 + max(minFree 2, 15% of 4) = 6, supply 2, so 4 are missing.
+		// Two claimable Agents, demand 4: target 4 + max(minFree 2, 30% of 4) = 6, supply 2, so 4 are missing.
 		for _, a := range []*unstructured.Unstructured{agent("one", "p"), agent("two", "p")} {
 			status := a.Object["status"]
 			Expect(k8sClient.Create(ctx, a)).To(Succeed())
@@ -148,11 +148,17 @@ var _ = Describe("Inventory watches", func() {
 		setInfraEnvAnnotations("p", nil)
 		Eventually(w.notify, 10*time.Second).Should(Receive(Equal(pipeline.InstallRequest{Key: "p", Count: 3})))
 
-		// Replicas 7 -> 8: target 8 + max(2, 15% of 8 = 1) = 10 against supply 2 + 4 + 3 = 9, so 1 is missing.
+		// Replicas 7 -> 8: target 8 + max(2, 30% of 8 = 2) = 10 against supply 2 + 4 + 3 = 9, so 1 is missing.
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(np), np)).To(Succeed())
 		Expect(unstructured.SetNestedField(np.Object, int64(8), "spec", "replicas")).To(Succeed())
 		Expect(k8sClient.Update(ctx, np)).To(Succeed())
 		Eventually(w.notify, 10*time.Second).Should(Receive(Equal(pipeline.InstallRequest{Key: "p", Count: 1})))
+
+		// Replicas 8 -> 10: target 13 against supply 10 orders three through the watch.
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(np), np)).To(Succeed())
+		Expect(unstructured.SetNestedField(np.Object, int64(10), "spec", "replicas")).To(Succeed())
+		Expect(k8sClient.Update(ctx, np)).To(Succeed())
+		Eventually(w.notify, 10*time.Second).Should(Receive(Equal(pipeline.InstallRequest{Key: "p", Count: 3})))
 
 		// The pool is now exactly at target, so a config reload re-enqueues it (one more sweep) and orders nothing.
 		before := w.sweepCount()

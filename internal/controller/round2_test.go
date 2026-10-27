@@ -63,7 +63,7 @@ func TestF1SlowRecheckCannotSpendStaleSweep(t *testing.T) {
 	sweep := &invalidatingSweep{RunSweeper: f.sweep}
 	f.r.Sweeper = sweep
 	f.reconcile(t, "p")
-	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 2}}, f.install.requests)
+	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 3}}, f.install.requests)
 	require.Equal(t, 1, sweep.invalidated)
 	f.r.markAttempt("p", base.Add(100*time.Millisecond))
 	f.now = base.Add(9 * time.Second)
@@ -211,7 +211,7 @@ func TestF8MalformedAgentIsolatedToItsPool(t *testing.T) {
 
 func TestF10ConfigErrorBlocksOnlyInvalidPool(t *testing.T) {
 	f := setup(t, testConfig(), infra("p"), infra("q"), infra("r"))
-	require.NoError(t, f.r.cfg.Update([]byte("hubName: hub\ninstallURL: http://api/install\npools:\n  p: {paused: true}\n  q: {minBand: 0}\n  r: {}\n")))
+	require.NoError(t, f.r.cfg.Update([]byte("hubName: hub\ninstallURL: http://api/install\npools:\n  p: {paused: true}\n  q: {highPct: -1}\n  r: {}\n")))
 	for _, pool := range []string{"p", "q", "r"} {
 		f.reconcile(t, pool)
 	}
@@ -286,4 +286,22 @@ func TestF11ConfiguredThresholdAvailableBeforeReconcile(t *testing.T) {
 	f.r.cfg = config.NewStore(cfg)
 	f.reconcile(t, "p")
 	require.Equal(t, 1800.0, metric(t, f.reg, "herzi_stuck_after_seconds", nil))
+}
+
+func TestF4StatePersistenceFailurePreventsOrder(t *testing.T) {
+	f := setup(t, testConfig(), infra("p"), node("workers", "p", 10))
+	f.sweep.result.Slots = []pipeline.SlotRun{{Slot: 1, RunID: "failed", Status: pipeline.StatusFailed,
+		FailType: pipeline.FailServerNotAvailable, Started: f.now.Add(-30 * time.Minute), Closed: f.now.Add(-21 * time.Minute)}}
+	failure := errors.New("state storage unavailable")
+	c := &annotationClient{Client: f.c, patch: func(_ context.Context, body map[string]any) error {
+		annotations := body["metadata"].(map[string]any)["annotations"].(map[string]any)
+		require.Contains(t, annotations, kube.AnnotationState)
+		require.NotContains(t, annotations, kube.AnnotationBlockedUntil)
+		return failure
+	}}
+	f.r.Client = c
+	_, err := f.r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(infra("p"))})
+	require.ErrorIs(t, err, failure)
+	require.Len(t, c.bodies, 1)
+	require.Empty(t, f.install.requests)
 }

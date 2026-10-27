@@ -100,11 +100,8 @@ func validatePool(p PoolConfig, maxSlots int, interval time.Duration) error {
 			problems = append(problems, fmt.Errorf("%s: %s", field, rule))
 		}
 	}
-	check(p.LowPct >= 0, "lowPct", "must be >= 0")
 	check(p.HighPct >= 0, "highPct", "must be >= 0")
-	check(p.LowPct <= p.HighPct, "lowPct/highPct", "lowPct must be <= highPct")
 	check(p.MinFree >= 0, "minFree", "must be >= 0")
-	check(p.MinBand >= 1, "minBand", "must be >= 1")
 	check(p.MaxOpenRunsPerPool >= 1 && p.MaxOpenRunsPerPool <= maxSlots && p.MaxOpenRunsPerPool <= 100,
 		"maxOpenRunsPerPool", "must be between 1 and maxSlots and <= 100")
 	for _, field := range []struct {

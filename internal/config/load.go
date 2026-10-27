@@ -24,10 +24,8 @@ func (d *durationText) UnmarshalYAML(n *yaml.Node) error {
 }
 
 type poolInput struct {
-	LowPct             *int          `yaml:"lowPct"`
 	HighPct            *int          `yaml:"highPct"`
 	MinFree            *int          `yaml:"minFree"`
-	MinBand            *int          `yaml:"minBand"`
 	MaxOpenRunsPerPool *int          `yaml:"maxOpenRunsPerPool"`
 	ProbeInterval      *durationText `yaml:"probeInterval"`
 	DrawGrace          *durationText `yaml:"drawGrace"`
@@ -58,6 +56,9 @@ type configInput struct {
 // Load implements Part 2, Config: "An unknown key under a pool is an error".
 // It validates the document, hub and defaults; merged pool errors remain available through PoolErrors.
 func Load(data []byte) (Config, error) {
+	if err := removedPoolKeys(data); err != nil {
+		return Config{}, err
+	}
 	var input configInput
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -174,10 +175,8 @@ func parseDuration(raw *durationText, field string) (*time.Duration, error) {
 
 func (p poolInput) convert(path string) (PoolOverride, error) {
 	o := PoolOverride{
-		LowPct:             p.LowPct,
 		HighPct:            p.HighPct,
 		MinFree:            p.MinFree,
-		MinBand:            p.MinBand,
 		MaxOpenRunsPerPool: p.MaxOpenRunsPerPool,
 		DryRunGrow:         p.DryRunGrow,
 		Paused:             p.Paused,

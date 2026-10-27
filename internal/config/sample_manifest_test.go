@@ -24,7 +24,7 @@ func TestShippedSampleLoads(t *testing.T) {
 	if !cfg.ForPool("32-128-zone-1").DryRunGrow {
 		t.Fatal("the example pools must start in dry-run")
 	}
-	if cfg.ForPool("32-128-zone-1").MinFree != 5 || cfg.ForPool("8-32-zone-1").LowPct != 25 {
+	if cfg.ForPool("32-128-zone-1").MinFree != 5 || cfg.ForPool("8-32-zone-1").HighPct != 25 {
 		t.Fatal("pool overrides were not merged")
 	}
 	if cfg.Defaults.DryRunGrow {

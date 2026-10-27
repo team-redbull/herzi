@@ -52,13 +52,13 @@ herzi_pool_probe_mode == 1 and on(pool) herzi_pool_failure_class{class="capacity
 herzi_pool_need{pool="32-128-zone-1"}
 ```
 
-Inspect server-scan availability/reservations for this pool; rack or release matching hardware and allow the next 20-minute probe. A run started after the failure and alive for drawGrace restores full orders. Do not raise the open-run cap to cure missing hardware.
+Inspect server-scan availability/reservations for this pool; rack or release matching hardware and allow the next 20-minute probe. A run started after the failure restores Full only if Completed, or Running for at least drawGrace with a completed `acquire_servers` activity in run-pinned history. Runtime alone is not proof. Do not raise the open-run cap to cure missing hardware.
 
 <a id="install-failing"></a>
 
 ## HerziInstallFailing
 
-The last failure is outside the capacity class. One failure alerts; three consecutive failures without success can cause probing.
+The last failure is outside the capacity class. One failure alerts; three distinct failed execution IDs since the last success can cause probing. Unreadable failed history exports `class="unknown"` and prevents Full spending; inspect Temporal history access even though this alert selects only `class="other"`.
 
 Confirm with the common kubectl/log commands and these exact PromQL queries:
 
@@ -73,7 +73,7 @@ Inspect the latest failed slot close event in Temporal and the install worker lo
 
 ## HerziPoolBlocked
 
-Validation has prevented growth continuously for 15 minutes. The reason label identifies the blocker; intentional pause/unmanaged states may be expected.
+Validation has prevented growth continuously for 15 minutes. The reason label identifies the blocker; the alert excludes `reason="paused"` and `reason="blocked_until"`.
 
 Confirm with the common kubectl/log commands and these exact PromQL queries:
 
@@ -86,7 +86,7 @@ herzi_pool_blocked{pool="32-128-zone-1"}
 kubectl -n "$AGENT_NAMESPACE" get infraenvs.agent-install.openshift.io "$POOL" -o jsonpath='{.metadata.annotations.herzi\.redbull\.io/blocked-until}{"\n"}'
 ```
 
-For read/sweep errors restore API or Temporal access and RBAC. For zero pollers repair workers. For selector/config errors correct only the affected pool. For paused/unmanaged states confirm operator intent and silence as appropriate. For an ambiguity block let it expire and require a full sweep before ordering; never erase it to force a retry.
+For read/sweep errors restore API or Temporal access and RBAC. For zero pollers repair workers. For selector/config errors correct only the affected pool. For paused/unmanaged states confirm operator intent; paused pools do not fire this alert. The `herzi.redbull.io/blocked-until` marker is persisted BEFORE every POST, cleared with JSON null after a definite parsed outcome, and extended from outcome time for ambiguous/rejected outcomes. Prewrite failure prevents the POST; failed clear leaves expiry protection. Durable `herzi.redbull.io/state` retains failure/probe evidence across restart and slot reuse. For an ambiguity block let it expire and require a full sweep before ordering; never erase it to force a retry.
 
 <a id="stuck-agents"></a>
 
@@ -107,12 +107,13 @@ Inspect status transitions, connectivity, approval and stale agentMachineRef lab
 
 ## HerziStuckOpenRuns
 
-An install slot has been open for more than the fixed two-hour alert threshold. This alert alone does not change the decision.
+An install slot has been open for more than the startup-configured `stuckAfter` threshold (default 2h), exported as the unlabeled `herzi_stuck_after_seconds` gauge. Changing it requires restarting the controller. This alert alone does not change the decision.
 
 Confirm with the common kubectl/log commands and these exact PromQL queries:
 
 ```promql
-herzi_oldest_open_run_seconds > 7200
+herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds
+herzi_stuck_after_seconds
 herzi_pool_open_runs{pool="32-128-zone-1"}
 ```
 
@@ -194,13 +195,15 @@ kubectl -n herzi-system get configmap herzi-config -o go-template='{{index .data
 kubectl -n herzi-system logs deployment/herzi -c manager --since=30m
 ```
 
-Compare the mounted ConfigMap with the intended config; fix unknown keys, duration strings and merged constraints. Reapply the ConfigMap and confirm herzi_config_valid returns to 1. A per-pool validation failure can also appear as a pool block.
+Compare the mounted ConfigMap with the intended config; fix unknown keys, duration strings and merged constraints. Reapply the ConfigMap and confirm herzi_config_valid returns to 1. Invalid supported settings in a merged pool publish with healthy changes and block only that pool (`reason="config_invalid"`); they do not reject the document. Validate `maxSlots == 100`, `1 <= maxOpenRunsPerPool <= 100`, nonnegative highPct/minFree, positive durations, `failureMemory >= 2*probeInterval`, `interval <= probeInterval`, `settlingMax >= probeInterval`, and `drawGrace < probeInterval`, including defaults and each merged pool.
+
+For migration errors, delete `lowPct` and `minBand` from defaults and every override, including zero/null values. The diagnostics are `defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct` and `pools.<name>.minBand was removed: the controller no longer has a ceiling; delete minBand`. These obsolete keys reject the whole document. Apply the migrated configuration with the new image; rollback requires the matching old configuration. Set `highPct: 15` for the former target buffer, or retain the new default 30.
 
 <a id="assigned-exceeds-demand"></a>
 
 ## HerziAssignedExceedsDemand
 
-Assigned Agents have exceeded active NodePool demand for three hours, suggesting orphaned bindings.
+Assigned Agents have exceeded active NodePool demand for three hours, suggesting orphaned bindings. This is an investigation signal, not proof. Free claimable/settling spare capacity alone does not fire this alert: the controller only adds servers and capacity is never reclaimed. Lowering demand or the buffer only stops additions. Even assigned 21 at demand 20 can still need five additions toward the default target 26.
 
 Confirm with the common kubectl/log commands and these exact PromQL queries:
 
@@ -209,5 +212,5 @@ herzi_pool_assigned > on(pool) herzi_pool_demand
 herzi_pool_assigned{pool="32-128-zone-1"} - on(pool) herzi_pool_demand{pool="32-128-zone-1"}
 ```
 
-Compare bound clusterDeploymentName references with active NodePools and hosted clusters. Investigate HyperShift release behavior, deleted/paused NodePools and upgrade surge. Repair bindings through the owning operator after confirming ownership. herzi cannot identify or remove orphan-bound Agents automatically.
+Compare bound clusterDeploymentName references with active NodePools and hosted clusters. Investigate HyperShift release behavior, deleted/paused NodePools and upgrade surge. Repair bindings through the owning operator after confirming ownership. herzi cannot identify or correct orphan bindings automatically.
 

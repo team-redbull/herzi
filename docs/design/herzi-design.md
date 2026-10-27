@@ -1,9 +1,10 @@
 # Inventory Controller — v2
 
-**Scope of v1:** grow for real; shrink is log-only. Cooldown, real shrink and hardware growth are in the backlog.
-**Design source:** [`inventory-controller.md`](inventory-controller.md), procedures 01 and 02.
+**Scope:** permanently add-only. The controller only adds servers; capacity is never reclaimed.
+VM creation and install-route idempotency remain backlog items.
+**Design source:** [`inventory-controller-original.md`](inventory-controller-original.md), superseded historical input.
 **Reviews applied:** two Codex reviews, a logic simulation review and a feasibility review.
-Codex's review of this exact version is still pending; its findings will be added to Part 3.
+Independent round-2 safety fixes and the owner-approved add-only change are incorporated below.
 
 | Part | What it is |
 |---|---|
@@ -24,16 +25,32 @@ finds machines already waiting instead of waiting for a new install.
 
 Every pass, for each pool:
 
-```
-demand  = sum of NodePool replicas that name this InfraEnv
-supply  = assigned + claimable + settling + open runs
-target  = demand + low          (a buffer so the next scale-up is instant)
-ceiling = demand + high         (above this the pool is too big)
-need    = target - supply
+```text
+buffer = max(minFree, (highPct*demand + 50)/100)  # integer half-up rounding
+target = demand + buffer
+need   = target - (assigned + claimable + settling + open)
 ```
 
-If `need > 0` it asks the install API for `need` more machines. If the pool is above the ceiling it
-only writes a "would remove" log line (shrink is not built yet). Otherwise it does nothing.
+With valid observations and an unblocked pool, positive need enters Full/Probe growth.
+At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
+before considering failures or probes. Capacity is never reclaimed: lowering demand or
+the buffer only stops additions. Spare capacity can persist indefinitely.
+
+With `highPct: 30` and `minFree: 2`:
+
+| Demand | Rounded percentage | Buffer | Target |
+|---:|---:|---:|---:|
+| 0 | 0 | 2 | 2 |
+| 4 | 1 | 2 | 6 |
+| 6 | 2 | 2 | 8 |
+| 10 | 3 | 3 | 13 |
+| 12 | 4 | 4 | 16 |
+| 20 | 6 | 6 | 26 |
+| 50 | 15 | 15 | 65 |
+
+The default target buffer intentionally doubles from 15% to 30%: demand 20 previously
+had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
+to retain the old target behavior. The `minFree` floor still protects small pools.
 
 **What each supply term means**
 
@@ -42,48 +59,33 @@ only writes a "would remove" log line (shrink is not built yet). Otherwise it do
 | assigned | Agents bound to a tenant cluster |
 | claimable | Agents free to be claimed right now: unbound, approved, connected, not deleting |
 | settling | Agents that are free but not claimable *yet*: rebooting after a release, just registered, or carrying a leftover label. Counted for up to an hour from their last state change, then they stop counting and raise an alert |
-| open runs | Install runs still going whose machine has not arrived yet |
-
-**The buffer.** With the default settings (low 15%, high 30%, `minFree` 2, minimum band 1):
-
-| demand | low | high | target | ceiling |
-|---|---|---|---|---|
-| 0 | 2 | 3 | 2 | 3 |
-| 4 | 2 | 3 | 6 | 7 |
-| 6 | 2 | 3 | 8 | 9 |
-| 10 | 2 | 3 | 12 | 13 |
-| 12 | 2 | 4 | 14 | 16 |
-| 20 | 3 | 6 | 23 | 26 |
-| 50 | 8 | 15 | 58 | 65 |
-
-The percentage protects big pools, the floor protects small ones, and the minimum band keeps the
-ceiling at least one above the target.
+| open runs | Every Running install slot, including brief overlap after its Agent arrives |
 
 ## Worked cases
 
 ### 1. Steady state
-Demand 10, assigned 10, claimable 2. Target 12, supply 12. **Nothing to do. The controller stays silent.**
+Demand 10, assigned 10, claimable 3. Target 13, supply 13. **Nothing to do. The controller stays silent.**
 
 ### 2. A tenant scales up
-Demand goes 10 → 16, with 10 assigned and 2 free. New target is 18.
+Demand goes 10 → 16, with 10 assigned and 3 free. New buffer is 5, target 21.
 
 ```
-10:00  the NodePool claims the 2 spares: assigned 12, claimable 0 → supply 12, need 6
-10:00  controller orders 6 machines (one request of count=6)
-10:02  6 runs open → supply 18, need 0 → silent
-10:25  runs finish, Agents appear, claimable 2 again → buffer rebuilt
+10:00  the NodePool claims the 3 spares: assigned 13, claimable 0 → supply 13, need 8
+10:00  controller orders 8 machines (one request of count=8)
+10:02  8 runs open → supply 21, need 0 → Hold (at or above target)
+10:25  runs finish, Agents appear; tenant claims 3 more, leaving claimable 5 → buffer rebuilt
 ```
 
-The tenant got 2 machines immediately. The other 4 wait for installs, and the buffer is rebuilt behind them.
+The tenant got 3 machines immediately. The other 3 wait for installs; five rebuild the buffer.
 
 ### 3. A very large scale-up
-An empty pool, demand 0 → 50. Target 58. The controller never has more than 15 runs open per pool
+An empty pool, demand 0 → 50. Target 65. The controller never has more than 15 runs open per pool
 (a load limit) and the API takes at most 20 per request.
 
 ```
-10:00  need 58 → order 15
+10:00  need 65 → order 15
 10:20  10 runs done: supply 10 Agents + 5 open → order 10 more (headroom 10)
-...    about 4 waves; each pass orders only what is still missing
+...    about 5 waves; each pass orders only what is still missing
 ```
 
 It never re-orders what is already in flight: open runs are subtracted every time.
@@ -93,13 +95,12 @@ Demand 20 → 4. 16 Agents are released. They reboot into the discovery image fo
 wiped before they register as free.
 
 ```
-10:00  assigned 4, claimable 3, settling 16 (the rebooting ones) → supply 23
-10:10  tenant scales to 12 → target 14, supply 23 → need 0 → no order
+10:00  assigned 4, claimable 6, settling 16 (the rebooting ones) → supply 26
+10:10  tenant scales to 12 → target 16, supply 26 → need -10 → no order
 10:21  the 16 return as claimable
 ```
 
-The rebooting machines count, so the controller does not order 7 machines nobody needs.
-Shrink would have shown "would remove" only if nothing was still settling.
+The rebooting machines count, so the controller does not order machines nobody needs. Capacity remains available for future demand.
 
 ### 5. The inventory has no free machines
 The pool is short by 6 and server-scan has nothing for it.
@@ -118,7 +119,7 @@ Same pool, 3 hours later someone racks servers and server-scan sees them.
 
 ```
 next probe (within 20 min): the run is still going 2 minutes later AND acquire_servers completed → proof a machine was found
-controller returns to FULL orders at once: need 6 → orders the rest
+controller returns to FULL orders at once: the probe counts as supply → order the remaining need
 ```
 
 A run older than 2 minutes proves recovery only after its acquire_servers activity completed.
@@ -156,8 +157,8 @@ a single failed run for any non-capacity reason → alert only, full orders cont
 ```
 
 ### 10. The controller restarts or loses its lease
-The pod exits at once, with no draining. The new leader keeps nothing in memory: it reads the block
-annotation, then asks Temporal about all 100 slots of each pool. It reaches the same answer as the old one.
+The pod exits at once, with no draining. The new leader reads the durable state and pre-POST block
+annotations, then asks Temporal about all 100 slots of each pool. It reaches the same answer as the old one.
 
 ### 11. A worker is down
 The pool is **blocked, not ordered**, when no worker polls the hub's activity queue, the install
@@ -231,14 +232,18 @@ internal/installer/            I/O: POST install-server
 internal/config/               Config, validation, last-good on a bad update
 ```
 
-## Workflow ids (workflows PR #12)
+## Workflow ids
 
-```
-pool run : add-server-to-mce_<mce>_<infraenv>_<slot>     slot 1..maxSlots (100; must equal the route)
-named run: add-server-to-mce_<mce>_<server>              not counted by the controller
-```
+Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
+are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
+after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
+are outside pool accounting. The authoritative builders are
+`/home/toto/code/workflows/shared/workflow_ids.py`.
 
-`_` joins every part (it cannot occur in a Kubernetes name). Old `install-server-*` ids are ignored.
+Runs started before the workflows PR keep their previous IDs and are not accounted
+for by this controller. Start every pool in dry run. Enable real growth
+(`dryRunGrow: false`) only after verifying in Temporal that no previous-ID install
+runs are still open. There is no automatic multi-family accounting.
 
 ## Types
 
@@ -250,7 +255,8 @@ type SlotRun struct {
     Status   string     // Running | Completed | Failed | TimedOut | Terminated | NotFound
     Started  time.Time
     Closed   time.Time  // zero while Running
-    FailType string     // only for Failed; read from the close event, cached per (id, runId)
+    FailType string     // Failed/TimedOut close history; unreadable history => unknown
+    Acquired bool       // completed acquire_servers activity in this exact execution
 }
 
 type RawSnapshot struct {
@@ -264,12 +270,13 @@ type RawSnapshot struct {
 type PoolFacts struct {
     Key        PoolKey
     Managed, Paused bool
-    BlockedUntil time.Time        // from the InfraEnv annotation set after an unclear POST
+    BlockedUntil time.Time        // from the InfraEnv pending marker written BEFORE each POST
     Demand     int
     Assigned   int         // bound to a cluster
     Claimable  int         // unbound, approved, connected, no agentMachineRef, not deleting
     Settling   int         // unbound + not claimable + not deleting, last state change < settlingMax (60m)
     StuckAgents int        // same but older than settlingMax: NOT counted, alert
+    State      State       // durable annotation merged with sweep evidence
     Open       []SlotRun   // every Running slot
     Closed     []SlotRun   // closed slots (probe evidence)
     Problems   []Problem   // pool-scoped: block this pool only
@@ -279,9 +286,8 @@ type PoolFacts struct {
 type Verdict struct{ Key PoolKey; Blocked bool; Reasons []string }
 
 type Mode int                // Full | Probe
-type Intent interface{ isIntent() }                       // sealed: Grow, WouldRemove, Hold
+type Intent interface{ isIntent() }                       // sealed: Grow, Hold
 type Grow        struct{ Key PoolKey; Need int; Mode Mode }
-type WouldRemove struct{ Key PoolKey; Surplus, Total, Target, Ceiling int }
 type Hold        struct{ Key PoolKey; Reason string }
 
 type InstallRequest struct{ Key PoolKey; Count int }      // 1..20, namespace always sent
@@ -291,8 +297,8 @@ type InstallRequest struct{ Key PoolKey; Count int }      // 1..20, namespace al
 
 ```go
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-    ctx, cancel := context.WithTimeout(ctx, cfgSnap.ReconcileTimeout); defer cancel()
     cfg := r.cfg.Snapshot()                                // one frozen config for the whole pass
+    ctx, cancel := context.WithTimeout(ctx, cfg.ReconcileTimeout); defer cancel()
     key := PoolKey(req.Name)
     pc  := cfg.ForPool(string(key))                        // defaults with this pool's overrides merged in
 
@@ -303,7 +309,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
     if v.Blocked { log.Warn(key, v.Reasons); return requeue(2*time.Minute), nil }
 
     switch i := pipeline.Decide(facts, cfg, raw.At).(type) {
-    case WouldRemove: log.Info("WOULD REMOVE", i)
     case Hold:        log.V(1).Info("hold", i.Reason)
     case Grow:
         // last check before spending: re-read this pool's Agents/NodePools UNCACHED, re-run all
@@ -312,16 +317,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
         v2 := pipeline.Validate(fresh, raw, cfg)
         g2, ok := pipeline.Decide(fresh, cfg, raw.At).(Grow)
         if v2.Blocked || !ok { break }
+        // Check again AFTER the uncached recheck; elapsed time cannot refresh an old sweep.
+        if !raw.Sweep.ObservedAt.After(r.previousAttempt(key)) { break }
         g2.Need = min(g2.Need, i.Need)
         if pc.DryRunGrow { log.Info("WOULD INSTALL", g2); break }
         for _, ir := range pipeline.Plan(g2, pc, fresh) {
+            // Persist pending deadline and, for Probe, its schedule BEFORE spending.
+            // Independent cancellation-detached 10-second patch; failure means no POST.
+            if err := r.prewritePending(ctx, key, g2.Mode); err != nil { return ctrl.Result{}, err }
             res, err := r.installer.Install(ctx, ir)
-            r.recordOutcome(ctx, key, ir, res, err)
+            r.sweeper.Invalidate(key) // every attempt; next sweep must postdate this attempt
+            r.recordOutcome(ctx, key, ir, res, err) // definite: null clear; uncertain: renew from outcome time
         }
     }
     return requeue(2*time.Minute), nil
 }
-// SetupWithManager: For(InfraEnv); Watches(NodePool/Agent -> same key); Watches(ConfigMap -> all pools);
+// SetupWithManager: For(InfraEnv); Watches(NodePool/Agent -> same key);
+// accepted file-watcher updates requeue all pools;
 // leader election ON (LeaderElectionReleaseOnCancel for clean rollouts).
 ```
 
@@ -382,22 +394,10 @@ func Validate(f PoolFacts, raw RawSnapshot, cfg Config) Verdict {
 ```go
 func Decide(f PoolFacts, cfg Config, now time.Time) Intent {
     p       := cfg.ForPool(string(f.Key))              // defaults with this pool's overrides merged in
-    low     := max(p.MinFree, (p.LowPct*f.Demand + 50) / 100)            // half-up in integers
-    high    := max(low + p.MinBand, (p.HighPct*f.Demand + 50) / 100)      // band at least MinBand wide
-    target  := f.Demand + low
-    ceiling := f.Demand + high
-
-    total   := f.Assigned + f.Claimable + f.Settling
-    running := len(f.Open)
-    need    := target - (total + running)                                 // running ALWAYS subtracted
-
-    if need <= 0 {
-        if total > ceiling && running == 0 && f.Settling == 0 {
-            surplus := min(total - target, f.Claimable)                   // only free machines can ever be removed
-            return WouldRemove{f.Key, surplus, total, target, ceiling}
-        }
-        return Hold{f.Key, "inside band"}
-    }
+    buffer := max(p.MinFree, (p.HighPct*f.Demand + 50) / 100) // integer half-up
+    target := f.Demand + buffer
+    need   := target - (f.Assigned + f.Claimable + f.Settling + len(f.Open))
+    if need <= 0 { return Hold{f.Key, HoldAtOrAboveTarget} } // "at or above target"
 
     // ---- probe rule: merge durable state with this sweep ----
     failing, lastFail := hardwareLooksMissing(f, p, now)
@@ -435,8 +435,8 @@ func Plan(g Grow, p PoolConfig, f PoolFacts) []InstallRequest {
 ## Growth protocol (gather + recordOutcome)
 
 ```
-Counting open runs, no memory needed:
-  describe  add-server-to-mce_<mce>_<infraenv>_<1..maxSlots>   (parallelism ~10, per-call deadline)
+Counting open runs and merging durable evidence:
+  describe  install-server-<mce>_<infraEnv>_<1..100>   (parallelism ~10, per-call deadline)
   NotFound (errors.As serviceerror.NotFound) = free slot. Any other error = the pool is BLOCKED this pass.
   Describe(workflowId) with no run id returns the LATEST run and is strongly consistent, unlike a List.
   For slots closed Failed within failureMemory: read the failure type from the CLOSE EVENT
@@ -509,23 +509,21 @@ stuckAfter: 2h                      # an open run older than this => alert only
 
 # ---- pool settings: defaults, overridable per pool ----
 defaults:
-  lowPct: 15
   highPct: 30
   minFree: 2
-  minBand: 1
   maxOpenRunsPerPool: 15
   probeInterval: 20m                # server-scan refreshes about every 15 min
   drawGrace: 2m                     # minimum age for acquisition evidence to prove recovery
   failureMemory: 6h
   settlingMax: 60m                  # matches the install workflow's one-hour agent wait
-  dryRunGrow: false                 # log "WOULD INSTALL" instead of ordering
+  dryRunGrow: true                  # rollout safeguard: log "WOULD INSTALL" instead of ordering
   paused: false
 
 # ---- pools: OPT-IN, keyed by InfraEnv name; only the fields written here differ ----
 pools:
   "32-128-zone-1": { minFree: 5, maxOpenRunsPerPool: 8 }
   "16-64-zone-2":  { paused: true }
-  "8-32-zone-1":   { lowPct: 25, dryRunGrow: true }
+  "8-32-zone-1":   { highPct: 25, dryRunGrow: true }
 ```
 
 **Merge rule.** For a pool, each field takes the pool's value if it is written, otherwise the default.
@@ -541,16 +539,36 @@ func (c Config) ForPool(name string) PoolConfig {
 }
 ```
 
-**Validation, after the merge, per pool.** `lowPct`/`highPct` >= 0 and `lowPct <= highPct`; `minFree` >= 0;
-`minBand` >= 1; `maxOpenRunsPerPool` between 1 and `maxSlots`; durations > 0; `drawGrace` < `probeInterval`; `failureMemory` >= 2 × `probeInterval`;
-`settlingMax` >= `probeInterval`; hub `interval` <= each pool's `probeInterval`.
-A pool that fails validation is **blocked with the reason named** (other pools are unaffected). A bad
-ConfigMap update as a whole (unparseable, unknown keys) is rejected and the last good one kept.
-An unknown key under a pool is an error, so a typo such as `minfree` is caught instead of ignored.
+**Validation.** Hub `maxSlots` must equal 100. After merging defaults and overrides:
+`highPct >= 0`, `minFree >= 0`, `1 <= maxOpenRunsPerPool <= maxSlots`, durations > 0,
+`drawGrace < probeInterval`, `failureMemory >= 2*probeInterval`,
+`settlingMax >= probeInterval`, and hub `interval <= probeInterval`.
+Timing rules apply to defaults and every merged pool. Bad YAML, unknown keys, invalid durations,
+hub settings or defaults reject the document and retain last good on reload. Invalid merged
+pools remain published with `PoolErrors`; `reason="config_invalid"` blocks only those pools.
+
+### Configuration migration
+
+Delete `lowPct` and `minBand` from both `defaults` and every pool override, even if
+set to zero or null. They are rejected with field-path migration diagnostics, for example:
+
+```text
+defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct
+pools.<name>.minBand was removed: the controller no longer has a ceiling; delete minBand
+```
+
+These are document/schema errors: startup fails, and a reload rejects the entire update,
+retaining the last good configuration. Invalid values of supported keys in merged pools
+instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
+Deploy the migrated config with the new image. Rollback requires the matching old config
+as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
+`highPct: 15` explicitly for the former target buffer; the new default remains 30.
 
 `minFree` is the operator's to size: the largest scale request to absorb without a wait, plus the surge of
 any pool still using `upgradeType: Replace`. A pool can also be paused with an annotation on the InfraEnv,
 with no ConfigMap edit.
+
+The decision uses signed need; `herzi_pool_need` reports `max(0, need)`.
 
 ## Invariants (write these tests first)
 
@@ -565,7 +583,7 @@ with no ConfigMap edit.
 | Proof must have STARTED after the last capacity failure | doomed bursts after a partial order |
 | Free machines (claimable, settling) are never dropped from supply while rebooting | over-order after a scale-down |
 | An Agent with a stale `agentMachineRef` is settling, not invisible | runaway ordering |
-| `Surplus = min(total - target, claimable)`; no WouldRemove while any Agent is settling or a run is open | misleading shrink log |
+| At/above target always Holds, regardless of supply composition or failure evidence | no unnecessary additions or probes |
 | Zero pollers on any of the three queues, or a poller error, blocks the pool | runs that never start |
 | Hub-scoped findings never block another pool | one stray object stalling the hub |
 | Unmanaged, paused, early-bound or deleting pool never grows | opt-in only |
@@ -575,33 +593,42 @@ with no ConfigMap edit.
 
 ## Test table for Decide
 
-Each row carries its own buffers (`low` / `high`), so it does not depend on the percentages.
-Columns: demand, assigned, claimable, settling, open, recent closed runs, then the expected intent.
+Each custom-buffer row uses `highPct: 0, minFree: <buffer>`; the demand-50 row
+uses defaults (`highPct: 30, minFree: 2`). Probe rows use the default timings.
+Validation runs first; unmanaged or blocked pools never order.
 
-| demand | assigned | claimable | settling | open | recent | low / high | expect |
+| demand | assigned | claimable | settling | open | recent evidence | buffer | expect |
 |---|---|---|---|---|---|---|---|
-| 20 | 18 | 3 | 0 | 0 | – | 2 / 4 | Grow 1 Full (21 < 22) |
-| 20 | 20 | 2 | 0 | 0 | – | 2 / 4 | Hold (22 = target) |
-| 20 | 20 | 6 | 0 | 0 | – | 2 / 4 | WouldRemove 4 (26 > 24, claimable 6) |
-| 20 | 18 | 3 | 0 | 1 | – | 2 / 4 | Hold (21 + 1 = 22) |
-| 20 | 20 | 6 | 0 | 2 | – | 2 / 4 | Hold (running > 0) |
-| 20 | 4 | 3 | 16 | 0 | – | 2 / 4 | Hold (supply 23 >= 22), no WouldRemove (settling) |
-| 12 | 4 | 3 | 16 | 0 | – | 2 / 4 | Hold (supply 23 >= 14) |
-| 0 | 0 | 0 | 0 | 0 | – | 2 / 3 managed | Grow 2 Full (seed) |
-| 0 | 0 | 0 | 0 | 0 | – | not managed | Blocked (Validate), no order |
-| 6 | 0 | 0 | 0 | 0 | capacity fail 3 min ago, no proof | 2 / 3 | Hold "probe wait" |
-| 6 | 0 | 0 | 0 | 0 | capacity fail 21 min ago | 2 / 3 | Grow 1 Probe |
-| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 1 min ago | 2 / 3 | Hold "probe running" |
-| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 3 min ago, acquired | 2 / 3 | Grow 7 Full (proof) |
-| 10 | 4 | 0 | 0 | 6 | 4 capacity fails closed 10:00:20, the 6 runs started 10:00:00 | 2 / 3 | Hold "probe wait" until the scheduled probe (older open runs do not suppress it) |
-| 6 | 0 | 1 | 0 | 0 | capacity fail 30 min ago, run Completed 5 min ago, started after the fail | 2 / 3 | Grow 7 Full |
-| 6 | 0 | 0 | 0 | 0 | capacity fail 30 min ago, only a Completed run that started BEFORE it | 2 / 3 | Grow 1 Probe (not proof) |
-| 6 | 0 | 0 | 0 | 0 | 2 non-capacity fails, none since success | 2 / 3 | Grow 8 Full (needs 3 to probe) |
-| 6 | 0 | 0 | 0 | 0 | 3 non-capacity fails, none since success | 2 / 3 | Grow 1 Probe |
-| 50 | 0 | 0 | 0 | 0 | – | 8 / 15 | Grow 58 Full → Plan one request of 15 |
-| 9 | 12 | 0 | 0 | 0 | – | 2 / 3 | Hold; alert assigned > demand |
-| 6 | 6 | 3 | 0 | 0 | – | 2 / 3 | Hold (total 9 = ceiling 9 is not above it; boundary test) |
-| 6 | 6 | 4 | 0 | 0 | – | 2 / 3 | WouldRemove 2 (total 10 > ceiling 9; surplus = min(10 − 8, claimable 4) = 2) |
+| 20 | 18 | 3 | 0 | 0 | – | 2 | Grow 1 Full (target 22) |
+| 20 | 20 | 2 | 0 | 0 | – | 2 | Hold (at or above target) |
+| 20 | 20 | 6 | 0 | 0 | – | 2 | Hold (at or above target) |
+| 20 | 18 | 3 | 0 | 1 | – | 2 | Hold (supply 22) |
+| 20 | 20 | 6 | 0 | 2 | – | 2 | Hold (supply 28) |
+| 20 | 4 | 3 | 16 | 0 | – | 2 | Hold (supply 23) |
+| 12 | 4 | 3 | 16 | 0 | – | 2 | Hold (supply 23) |
+| 0 | 0 | 0 | 0 | 0 | – | 2 | Grow 2 Full (seed) |
+| 0 | 0 | 0 | 0 | 0 | unmanaged | 2 | Blocked (Validate) |
+| 6 | 0 | 0 | 0 | 0 | capacity fail 3 min ago, no proof | 2 | Hold "probe wait" |
+| 6 | 0 | 0 | 0 | 0 | capacity fail 21 min ago | 2 | Grow 1 Probe |
+| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 1 min ago | 2 | Hold "probe running" |
+| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 3 min ago, acquire_servers completed | 2 | Grow 7 Full |
+| 10 | 4 | 0 | 0 | 6 | capacity fails at 10:00:20; open work started 10:00:00 | 2 | Hold "probe wait" until scheduled probe; older open work does not suppress it |
+| 6 | 0 | 1 | 0 | 0 | capacity fail 30 min ago; Completed run started after failure | 2 | Grow 7 Full |
+| 6 | 0 | 0 | 0 | 0 | capacity fail 30 min ago; Completed run started before failure | 2 | Grow 1 Probe |
+| 6 | 0 | 0 | 0 | 0 | 2 distinct other failures since success | 2 | Grow 8 Full |
+| 6 | 0 | 0 | 0 | 0 | 3 distinct other failures since success | 2 | Grow 1 Probe |
+| 50 | 0 | 0 | 0 | 0 | – | 15 (default) | Grow 65 Full → Plan one request of 15 |
+| 9 | 12 | 0 | 0 | 0 | – | 2 | Hold; sustained assigned > demand alerts |
+| 6 | 6 | 1 | 0 | 0 | – | 2 | Grow 1 Full (target − 1) |
+| 6 | 6 | 2 | 0 | 0 | – | 2 | Hold (target equality) |
+| 6 | 6 | 3 | 0 | 0 | capacity/unknown/three-other failures | 2 | Hold (target + 1); no probe |
+| 6 | 6 | 4 | 0 | 0 | – | 2 | Hold (at or above target) |
+
+Additional coverage: zero buffer (`highPct: 0, minFree: 0`); exact-half rounding
+(demand 5, `highPct: 10, minFree: 0` gives target 6); and at/above target Holds
+for every supply composition, including failure evidence. Under defaults,
+demand 20 / assigned 18 / claimable 3 orders 5 toward target 26; even assigned 21
+with no other supply needs 5. More supply never increases the order count.
 
 ---
 
@@ -614,15 +641,15 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 | 1 | Duplicate orders (additive POST, visibility lag, lost reply) | order 12, reply lost, next pass orders 12 again → 34 for a target of 22 | The sweep Describes all 100 fixed slots, subtracts open runs, and cannot be reused after an attempt. A pre-POST marker survives cancellation/restart; uncertain outcomes extend it from outcome time. Rare remote-request residual accepted |
 | 2 | No leader election | two replicas each order 12 | Lease election; one replica. No fencing: accepted |
 | 3 | Stale or partial reads | cached Agents empty → orders again | Errors block the pool; `Recheck` re-reads uncached and re-validates before ordering |
-| 4 | `count` > 20 gives 422 forever | need 58 → 422 every pass | Plan caps each request at 20, waves for big deficits |
+| 4 | `count` > 20 gives 422 forever | need 65 → 422 every pass | Plan caps each request at 20, waves for big deficits |
 | 5 | Slots shared across hubs | other hub's runs counted as ours | MCE in the id (workflows PR #12) |
 | 6 | Spare may not match the NodePool selector | red/blue example | Not real here: selectors are only the InfraEnv label; any other selector blocks that pool |
 | 7 | Unlabeled Agents vanish | 4 of 12 uncounted → over-order | Warning and metric; never blocks another pool |
-| 8 | Failed or hung runs | fast fails re-ordered every pass | Probe mode: 1 machine per 20 min, failure-class alerts, poller check, 2 h stuck alert |
+| 8 | Failed or hung runs | fast fails re-ordered every pass | Probe mode: 1 machine per 20 min, failure-class alerts, poller check, startup-configured stuck alert |
 | 9 | Candidate window at batch 20 | 20 unusable candidates | Open-run cap is load tuning only. Real fix is server-side |
 | 10 | NodePool nil replicas, deleting, paused | nil pointer; phantom demand | Handled in Attribute; `pausedUntil` parsed |
 | 11 | Zero-demand pools auto-seeded | 12 InfraEnvs × minFree 2 → 24 machines | Opt-in `pools` list |
-| 12 | `maxFree` meaning | doc says ceiling, formula floors | Removed; `minFree` floors low, band width floors high |
+| 12 | Buffer floor meaning | small pools need a fixed spare floor | One buffer: max(minFree, rounded highPct percentage) |
 | 13 | 202 does not mean started | all slots busy → started 0 | Only `started` slots counted; the sweep decides the rest |
 | 14 | Early-bound InfraEnv | hosts bound at once | Validate blocks it |
 | 15 | Hand installs invisible | operator installs 3 by name → 3 extra | Accepted; a per-pool pause switch |
@@ -641,21 +668,21 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 | F8 unrelated malformed objects | Identity-first pool-scoped errors; unattributable warnings |
 | F9 old hung work | Only post-failure open runs suppress a new probe; total cap still applies |
 | F10 whole-document pool rejection | Publish valid changes; config_invalid blocks the affected pool |
-| F11 ineffective stuckAfter | herzi_stuck_after_seconds is initialized from startup config (process constant); dead scaffolding removed |
+| F11 ineffective stuckAfter | herzi_stuck_after_seconds is initialized from startup config (process constant); alert uses `> on() group_left` matching; restart to change |
 
 ## B. Flaws from the logic simulation
 
 | # | Flaw | Example | Fix |
 |---|---|---|---|
 | L1 | Wrong recovery evidence for probe mode | success from before the failure flips to Full → burst of doomed runs; slot reuse hides evidence; recovery waits a whole install | Proof must have started after the last capacity failure and (completed or still running after 2 min with a completed acquire_servers activity). Durable state survives slot reuse; a probe with acquisition proof returns the pool to Full |
-| L2 | Released machines vanish while rebooting | scale 20→4→12 orders 7 extra | `settling` = any free, unbound, non-deleting, not-yet-claimable Agent, measured from its last state change, up to 60 min, then an alert |
-| L3 | Orphan-bound Agents count as supply; shrink log overstates | 4 orphans hide a stall; "would remove 17" when 3 are free | `Surplus = min(total - target, claimable)`; no WouldRemove while any Agent settles; alert when assigned exceeds demand for hours. **Not fixed automatically** |
+| L2 | Released machines vanish while rebooting | released Agents disappear from supply during reboot | `settling` = any free, unbound, non-deleting, not-yet-claimable Agent, measured from its last state change, up to 60 min, then an alert |
+| L3 | Orphan-bound Agents count as supply | 4 stale bindings can hide a shortage | Alert when assigned exceeds demand for three hours; investigate ownership. No automatic binding correction |
 | L4 | Failure classes | batch shortage shows as `ServerReservedError`; one dead host throttles the pool | `ServerNotAvailableError` and `ServerReservedError` are capacity; unknown history also prevents Full. Three distinct other failed run IDs since last success enter probe mode |
 | L5 | Stale `agentMachineRef` Agent in no bucket | runaway ordering | Counted as settling, then an alert |
 | L6 | `Recheck` did not re-validate | worker dies just before the POST | Recheck re-runs Validate and Decide, orders at most the first amount |
 | L7 | The 5-minute block could miss a canceled outcome | restart forgets it | Prewritten on the InfraEnv with an independent 10-second patch context; clear uses annotation null |
 | L8 | Poller check missed the segment queue | runs hang at `resolving-vlan` | All three queues checked |
-| L9 | Zero-width band, truncating rounding | demand 6: target 8 = ceiling 8 | `high >= low + minBand`; integer half-up `(pct×d+50)/100` |
+| L9 | Truncating percentage rounding | demand 5 at 10% must round 0.5 to 1 | Integer half-up `(highPct*demand+50)/100`; test exact-half boundaries |
 | L10 | Double count while the Agent exists but the run is open | one pass of 1 too few | Accepted (seconds). Phase queries dropped: they removed almost nothing |
 
 ## C. Findings from the feasibility review
@@ -714,21 +741,19 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 | Demand attribution | InfraEnv label in the selector; the selector must be only that label |
 | Route | `POST /workflows/server-lifecycle/install-server` with `count` ≤ 20 (no `/bulk`) |
 | Scrub | InfraEnv ignition override wipes disks before an Agent registers; assumed perfect |
-| Cooldown | deferred; v1 only logs WouldRemove statelessly |
 | Slot discovery | Describe sweep over fixed ids |
 | Unclear POSTs | block 5 min (annotation), then sweep; rare race accepted |
 | Double counting | all Running runs count; free machines count while settling (≤ 60 min) |
 | Upgrade surge | operator sizes `minFree`; most upgrades are InPlace |
-| Hand installs / legacy ids | not counted / ignored; per-pool pause switch |
-| Workflow ids | `add-server-to-mce_<mce>_<infraenv>_<slot>` and `add-server-to-mce_<mce>_<server>` (PR #12) |
+| Named / previous-ID installs | outside slot accounting; verify previous-ID runs closed before enabling growth |
+| Workflow ids | `install-server-<mce>_<infraEnv>_<slot>` and `install-server-<mce>_<lowercased-server>` |
 | Empty pool | probe of 1 machine every 20 minutes (server-scan state refreshes every ~15 min) |
 | Failure classes | capacity class = `ServerNotAvailableError`, `ServerReservedError`; other failures probe after 3 in a row |
 | No worker | zero pollers on any of the three queues => do not order |
-| Stuck run | open longer than 2 h => alert only |
+| Stuck run | compare open age to unlabeled herzi_stuck_after_seconds from startup stuckAfter (default 2h); restart to change |
+| Capacity policy | add-only; at or above target Holds; lowering demand or buffer only stops additions |
 
 ## H. Backlog
-- **Cooldown before shrink (above-ceiling timer):** shrink only after a pool stays above its ceiling for 30 min; start in memory, move to an InfraEnv annotation when shrink really deletes.
-- **Real shrink:** call remove-server for `Surplus` claimable victims, longest idle, re-read right before.
 - **Idempotency key (or "ensure N open") on the install route:** removes the residual race.
 - **Orphan-bound Agent detection** by NodePool, so the controller can exclude them from supply.
 - **Verify the discovery-image wipe override:** ordered before registration, fails closed, every disk, present on VM and bare-metal InfraEnvs.

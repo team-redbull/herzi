@@ -179,7 +179,7 @@ func TestSnapshotSafetyInvariants(t *testing.T) {
 		raw.Sweep["a"] = SweepResult{Slots: []SlotRun{running(1), running(1), running(1)}}
 		facts := Attribute(raw, settings{poolConfig()})
 		equal(t, Validate(facts["a"], raw, poolConfig()).Blocked, false)
-		equal(t, Decide(facts["a"], poolConfig(), raw.At), Hold{Key: "a", Reason: HoldInsideBand})
+		equal(t, Decide(facts["a"], poolConfig(), raw.At), Hold{Key: "a", Reason: HoldAtOrAboveTarget})
 	})
 	t.Run("all Running slots count irrespective of age or Agent overlap", func(t *testing.T) {
 		raw := snapshot()
@@ -188,7 +188,7 @@ func TestSnapshotSafetyInvariants(t *testing.T) {
 		f := Attribute(raw, settings{poolConfig()})["a"]
 		equal(t, f.Claimable, 1)
 		equal(t, len(f.Open), 1)
-		equal(t, Decide(f, poolConfig(), raw.At), Hold{Key: "a", Reason: HoldInsideBand})
+		equal(t, Decide(f, poolConfig(), raw.At), Hold{Key: "a", Reason: HoldAtOrAboveTarget})
 	})
 	t.Run("settling stale reference remains supply", func(t *testing.T) {
 		raw := snapshot()
@@ -197,7 +197,7 @@ func TestSnapshotSafetyInvariants(t *testing.T) {
 		raw.Agents = []kube.Agent{agent(), a}
 		f := Attribute(raw, settings{poolConfig()})["a"]
 		equal(t, f.Settling, 1)
-		equal(t, Decide(f, poolConfig(), raw.At), Hold{Key: "a", Reason: HoldInsideBand})
+		equal(t, Decide(f, poolConfig(), raw.At), Hold{Key: "a", Reason: HoldAtOrAboveTarget})
 	})
 	t.Run("frozen inputs reused without mutation", func(t *testing.T) {
 		raw := snapshot()

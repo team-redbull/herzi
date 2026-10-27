@@ -35,11 +35,18 @@ An empty pool mapping opts in with all defaults. Durations are strings such as
 `"120s"` and `"20m"`, never integer nanoseconds. All fields appear in the
 [README reference](../../README.md#configuration).
 
-Validation is strict: unknown keys and unparsable files reject an update and
-keep the last good snapshot. Merged per-pool constraints include nonnegative
-percentages with lowPct <= highPct, minFree >= 0, minBand >= 1, open-run cap
-between 1 and maxSlots, positive durations and drawGrace < probeInterval.
-An invalid pool is blocked with its reason. A frozen snapshot serves each pass.
+Validation is strict: bad YAML, unknown keys, invalid duration syntax, hub settings or defaults
+reject the document (startup fails; reload keeps the last good snapshot). `maxSlots` must
+be exactly 100; tune load through `1 <= maxOpenRunsPerPool <= 100`.
+Defaults and merged pools require `highPct >= 0`, `minFree >= 0`, positive durations,
+`failureMemory >= 2*probeInterval`, `interval <= probeInterval`,
+`settlingMax >= probeInterval`, and `drawGrace < probeInterval`.
+Invalid merged pool settings remain published with `PoolErrors` and block only that
+pool with `reason="config_invalid"`; healthy changes, including pauses, still apply.
+A frozen snapshot serves each pass. There are exactly nine pool settings: `highPct`,
+`minFree`, `maxOpenRunsPerPool`, `probeInterval`, `drawGrace`, `failureMemory`,
+`settlingMax`, `dryRunGrow`, and `paused`.
+
 herzi polls the mounted file every ten seconds and requeues all pools when an accepted change
 appears; the directory mount avoids subPath so Kubernetes can refresh its contents (the kubelet
 needs up to about a minute). Check both the accepted-config metric and the logs after updating.
@@ -60,11 +67,63 @@ kubectl -n inventory annotate infraenvs.agent-install.openshift.io 32-128-zone-1
 Config `paused: true` also pauses a pool; removing the annotation does not override
 that setting. The controller still observes paused/unmanaged pools. NodePool
 `pausedUntil` and deletion exclude its demand. The InfraEnv annotation
-`herzi.redbull.io/blocked-until` is a controller-written RFC3339 timestamp persisted
-after an ambiguous POST (timeout/connection failure/5xx or rejected 422). It
-prevents new orders for `ambiguousWait` (5 minutes); a restart preserves it.
-Do not clear it to accelerate recovery: first let it expire and inspect every
-Temporal slot. A failed response item is also resolved by a subsequent sweep.
+`herzi.redbull.io/blocked-until` is a controller-written RFC3339 UTC deadline,
+written BEFORE each POST as attempt time + ambiguousWait (default 5m). Failure to
+persist prevents the POST. The Probe schedule is persisted in the same prewrite.
+All annotation patches use independent cancellation-detached, ten-second contexts.
+A definite parsed 202 outcome clears the pending marker with JSON null; a failed
+clear is logged and left to expire. Ambiguous/rejected outcomes retain it and extend
+the deadline from outcome time; failed renewal still leaves the original marker.
+A restart preserves the marker. Do not clear it to accelerate recovery: let it expire
+and inspect every Temporal slot. Failed response items are resolved by the next sweep.
+Every attempted POST invalidates the sweep; another order needs an observation strictly
+newer than the previous attempt, including after the uncached Kubernetes recheck.
+
+`herzi.redbull.io/state` stores compact bounded JSON (<= 1 KiB): `capFailAt`, up to
+three distinct `otherFails` entries (`runId`, `closedAt`), `lastOKAt`, and
+`probeNotBefore`. State merges with fresh uncached annotation data before writes,
+retains evidence across slot reuse/restart, and expires failures after failureMemory.
+Missing, corrupt or oversized state degrades to sweep-only evidence; unknown JSON
+keys are ignored. A Running run proves recovery only if it started after the failure,
+reached drawGrace and has a completed `acquire_servers` activity in run-pinned history.
+A Completed workflow must also have started after the failure. Runtime alone supplies
+no proof. Failed history reads produce `class="unknown"`, preventing Full spending.
+Only post-failure open work suppresses the next scheduled probe; all open work still
+counts against need and the open-run cap.
+
+## Capacity policy
+
+```text
+buffer = max(minFree, (highPct*demand + 50)/100)  # integer half-up rounding
+target = demand + buffer
+need   = target - (assigned + claimable + settling + open)
+```
+
+With valid observations and an unblocked pool, positive need enters Full/Probe growth.
+At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
+before considering failures or probes. Capacity is never reclaimed: lowering demand or
+the buffer only stops additions. Spare capacity can persist indefinitely.
+
+With `highPct: 30` and `minFree: 2`:
+
+| Demand | Rounded percentage | Buffer | Target |
+|---:|---:|---:|---:|
+| 0 | 0 | 2 | 2 |
+| 4 | 1 | 2 | 6 |
+| 6 | 2 | 2 | 8 |
+| 10 | 3 | 3 | 13 |
+| 12 | 4 | 4 | 16 |
+| 20 | 6 | 6 | 26 |
+| 50 | 15 | 15 | 65 |
+
+The default target buffer intentionally doubles from 15% to 30%: demand 20 previously
+had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
+to retain the old target behavior. The `minFree` floor still protects small pools.
+
+Open-run age is compared with the unlabeled `herzi_stuck_after_seconds` gauge,
+initialized before reconciliation from startup `stuckAfter` (default 2h). It is a
+process constant; changing the effective threshold requires restart. The rule uses
+`herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds`.
 
 ## Secrets, TLS and secure monitoring
 
@@ -124,6 +183,37 @@ only from namespaces labelled `metrics: enabled`; kubelet probe handling is CNI
 specific and must be tested. DNS resolving a new endpoint IP does not update
 NetworkPolicy ipBlocks automatically.
 
+## Alert rule tests
+
+The Kubernetes PrometheusRule wraps native rule groups under `spec`; promtool cannot
+read that wrapper directly. From the repository root, with Python/PyYAML and promtool
+installed, extract the actual shipped rules to a temporary directory and run the tests:
+
+```bash
+python3 - <<'PYTEST'
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import yaml
+
+source = Path("config/prometheus")
+with tempfile.TemporaryDirectory(prefix="herzi-alerts-") as directory:
+    work = Path(directory)
+    rules = yaml.safe_load((source / "herzi-alerts.yaml").read_text())["spec"]
+    (work / "herzi-alerts.rules.yaml").write_text(yaml.safe_dump(rules))
+    shutil.copyfile(source / "herzi-alerts.test.yaml", work / "herzi-alerts.test.yaml")
+    subprocess.run(["promtool", "check", "rules", "herzi-alerts.rules.yaml"], cwd=work, check=True)
+    subprocess.run(["promtool", "test", "rules", "herzi-alerts.test.yaml"], cwd=work, check=True)
+PYTEST
+kubectl kustomize config/prometheus
+```
+
+The tests cover configured stuck thresholds across multiple pools, three-hour excess
+bound capacity versus ordinary free spares, absent controller series after ten minutes,
+and paused/pending pools excluded from the blocked-pool alert. The test YAML is not
+a Kubernetes resource and is intentionally excluded from `kustomization.yaml`.
+
 ## Dry-run rollout
 
 1. Close the release gates above. Verify the real-hub checklist below,
@@ -139,11 +229,40 @@ NetworkPolicy ipBlocks automatically.
 4. Compare `WOULD INSTALL` logs to NodePool replicas, assigned/claimable/settling
    gauges and open slot histories. Simulate an empty-capacity failure, missing
    pollers, pause and invalid config; confirm blocks and last-good config behavior.
-5. Enable real growth by setting `dryRunGrow: false` for one pool. Watch orders,
+5. Verify in Temporal that no previous-ID install runs are still open, as described below.
+   Enable real growth by setting `dryRunGrow: false` for one pool. Watch orders,
    ambiguity blocks, Agents and need until stable, then enable remaining pools.
    To stop new orders restore dry run or pause; neither cancels existing workflows.
 
 ## Upgrade and rollback
+
+Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
+are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
+after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
+are outside pool accounting. The authoritative builders are
+`/home/toto/code/workflows/shared/workflow_ids.py`.
+
+Runs started before the workflows PR keep their previous IDs and are not accounted
+for by this controller. Start every pool in dry run. Enable real growth
+(`dryRunGrow: false`) only after verifying in Temporal that no previous-ID install
+runs are still open. There is no automatic multi-family accounting.
+
+### Configuration migration
+
+Delete `lowPct` and `minBand` from both `defaults` and every pool override, even if
+set to zero or null. They are rejected with field-path migration diagnostics, for example:
+
+```text
+defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct
+pools.<name>.minBand was removed: the controller no longer has a ceiling; delete minBand
+```
+
+These are document/schema errors: startup fails, and a reload rejects the entire update,
+retaining the last good configuration. Invalid values of supported keys in merged pools
+instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
+Deploy the migrated config with the new image. Rollback requires the matching old config
+as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
+`highPct: 15` explicitly for the former target buffer; the new default remains 30.
 
 Record the current image digest and export the ConfigMap to a protected backup;
 back up Secrets in your secret manager. Compare config fields/metrics/RBAC and
@@ -176,8 +295,8 @@ Behavior: lease loss exits immediately with no graceful draining
 (`GracefulShutdownTimeout = 0`); enable `LeaderElectionReleaseOnCancel` for clean
 rollouts and exit as soon as the manager stops. The Pod's 30-second termination
 grace is an upper bound for Kubernetes, not permission to keep ordering after
-lease loss. The new leader reads the persisted block annotation and describes
-all maxSlots fixed workflow IDs. No in-memory decision state is required.
+lease loss. The new leader reads the persisted pending marker and durable state annotation, then
+describes all 100 fixed workflow IDs. Restart does not reset the probe schedule.
 
 Leader election has no fencing. An old API request can still land after a new
 leader's sweep; over-ordering by one batch remains an accepted v1 risk. Never

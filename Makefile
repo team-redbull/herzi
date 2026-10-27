@@ -28,7 +28,7 @@ UNIT_PACKAGES = $$(go list ./internal/... | sed '\|/internal/controller\(/\|$$\)
 INTEGRATION_PACKAGES ?= ./internal/controller/...
 ignore-not-found ?= false
 
-.PHONY: all help manifests generate fmt vet test test-integration lint lint-fix lint-config vuln ci build run docker-build docker-push docker-buildx build-installer deploy undeploy lint-manifests check-rbac manifests-drift kustomize controller-gen envtest setup-envtest golangci-lint govulncheck
+.PHONY: all help manifests generate fmt vet test test-integration lint lint-fix lint-config vuln ci build run docker-build docker-push docker-buildx build-installer deploy undeploy lint-manifests test-alerts check-rbac manifests-drift kustomize controller-gen envtest setup-envtest golangci-lint govulncheck
 all: build
 help: ## Display targets.
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -83,6 +83,9 @@ lint-manifests: ## Render all trees; validate known Kubernetes schemas when kube
 	  else echo "kubeconform unavailable: rendered $$tree only"; fi; \
 	  rm -f "$$output"; \
 	done
+
+test-alerts: ## Unit-test the shipped alert rules with promtool.
+	./hack/test-alerts.sh
 
 check-rbac: ## Fail unless the default install grants the controller what it reads and patches.
 	@out=$$(mktemp); "$(KUBECTL)" kustomize config/default > "$$out"; status=0; \

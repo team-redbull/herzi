@@ -8,27 +8,20 @@ import (
 
 // Hold reasons are stable strings for callers reporting a decision.
 const (
-	HoldInsideBand   = "inside band"
-	HoldProbeRunning = "probe running"
-	HoldProbeWait    = "probe wait"
+	HoldAtOrAboveTarget = "at or above target"
+	HoldProbeRunning    = "probe running"
+	HoldProbeWait       = "probe wait"
 )
 
 // Decide implements design Part 2, "Stage 3 — Decide (pure)":
 // "running ALWAYS subtracted" and "PROOF ... STARTED AFTER the last ... failure".
 func Decide(f PoolFacts, p config.PoolConfig, now time.Time) Intent {
-	low := max(p.MinFree, (p.LowPct*f.Demand+50)/100)
-	high := max(low+p.MinBand, (p.HighPct*f.Demand+50)/100)
-	target, ceiling := f.Demand+low, f.Demand+high
+	_, target := Target(f.Demand, p)
 	total := f.Assigned + f.Claimable + f.Settling
 	running := len(f.Open)
 	need := target - total - running
 	if need <= 0 {
-		if total > ceiling && running == 0 && f.Settling == 0 {
-			if surplus := min(total-target, f.Claimable); surplus > 0 {
-				return WouldRemove{Key: f.Key, Surplus: surplus, Total: total, Target: target, Ceiling: ceiling}
-			}
-		}
-		return Hold{Key: f.Key, Reason: HoldInsideBand}
+		return Hold{Key: f.Key, Reason: HoldAtOrAboveTarget}
 	}
 	if failing, lastFail := hardwareLooksMissing(f, p, now); failing {
 		if hasPostFailureRun(f.Open, lastFail) {
@@ -63,4 +56,10 @@ func hasPostFailureRun(runs []SlotRun, failure time.Time) bool {
 		}
 	}
 	return false
+}
+
+// Target implements the add-only target buffer with integer half-up rounding.
+func Target(demand int, p config.PoolConfig) (buffer, target int) {
+	buffer = max(p.MinFree, (p.HighPct*demand+50)/100)
+	return buffer, demand + buffer
 }

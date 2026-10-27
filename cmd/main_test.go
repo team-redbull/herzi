@@ -32,7 +32,7 @@ func TestStartupBoundChanged(t *testing.T) {
 	})
 	t.Run("live settings are not startup-bound", func(t *testing.T) {
 		c := base
-		c.Interval, c.ReconcileTimeout, c.AmbiguousWait, c.StuckAfter = time.Hour, time.Hour, time.Hour, time.Hour
+		c.Interval, c.ReconcileTimeout, c.AmbiguousWait = time.Hour, time.Hour, time.Hour
 		if got := startupBoundChanged(base, c); len(got) != 0 {
 			t.Fatalf("timing settings apply live, got %v", got)
 		}
@@ -40,9 +40,10 @@ func TestStartupBoundChanged(t *testing.T) {
 	t.Run("each bound setting is reported", func(t *testing.T) {
 		c := base
 		c.HubName, c.AgentNamespace, c.InstallURL, c.MaxSlots = "ocp4-b", "other", "https://w/y", 50
+		c.StuckAfter = time.Hour
 		c.TemporalAddress, c.TemporalNamespace = "t2:7233", "ns"
 		c.ActivityQueue, c.WorkflowQueue, c.SegmentQueue = "a", "b", "c"
-		want := []string{"hubName", "agentNamespace", "installURL", "maxSlots", "temporalAddress",
+		want := []string{"hubName", "agentNamespace", "installURL", "maxSlots", "stuckAfter", "temporalAddress",
 			"temporalNamespace", "activityQueue", "workflowQueue", "segmentQueue"}
 		if got := startupBoundChanged(base, c); !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %v, want %v", got, want)
@@ -123,13 +124,20 @@ func TestReloadAcceptedOnlyAndRestartDedup(t *testing.T) {
 	<-reload
 	require.NoError(t, store.Update([]byte(strings.Replace(validConfig, "ocp4-a", "ocp4-b", 1))))
 	callback(nil)
+	<-reload
+	require.NoError(t, store.Update([]byte(validConfig+"stuckAfter: 30m\n")))
+	callback(nil)
+	callback(nil)
+	require.Len(t, reload, 1)
+	require.Contains(t, strings.Join(entries, " "), "stuckAfter")
+
 	restart := 0
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, "Hub settings changed") {
 			restart++
 		}
 	}
-	require.Equal(t, 2, restart)
+	require.Equal(t, 3, restart)
 	families, err := reg.Gather()
 	require.NoError(t, err)
 	for _, family := range families {
@@ -183,4 +191,30 @@ func TestFlagDefaultsAndTLS(t *testing.T) {
 	require.Equal(t, "/certs", opts.CertDir)
 	require.Equal(t, "cert.pem", opts.CertName)
 	require.Equal(t, "key.pem", opts.KeyName)
+}
+
+func TestRemovedKeyReloadDiagnosticIsSafe(t *testing.T) {
+	initial, err := config.Load([]byte(validConfig))
+	require.NoError(t, err)
+	store := config.NewStore(initial)
+	reload := make(chan event.GenericEvent, 1)
+	var entries []string
+	handler := reloadHandler(initial.HubConfig, store, metrics.New(prometheus.NewRegistry()), reload, logr.New(logCapture{entries: &entries}), "config.yaml")
+	for _, tt := range []struct{ suffix, want string }{
+		{"defaults: {lowPct: secret}", "defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct"},
+		{"defaults: {minBand: secret}", "defaults.minBand was removed: the controller no longer has a ceiling; delete minBand"},
+		{"pools: {'secret\\nvalue': {lowPct: secret}}", "pools.<invalid>.lowPct was removed"},
+	} {
+		entries = nil
+		err = store.Update([]byte(validConfig + tt.suffix))
+		require.Error(t, err)
+		handler(fmt.Errorf("secret wrapper: %w", err))
+		require.Empty(t, reload)
+		require.Contains(t, strings.Join(entries, " "), tt.want)
+		require.NotContains(t, strings.Join(entries, " "), "secret")
+		require.Equal(t, initial, store.Snapshot())
+	}
+	entries = nil
+	handler(errors.New("decoder secret"))
+	require.NotContains(t, strings.Join(entries, " "), "secret")
 }

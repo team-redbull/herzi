@@ -18,17 +18,17 @@ import (
 // Metrics owns collectors registered with the caller's registry. Methods are safe
 // for concurrent pools; no collector uses the process-global registry.
 type Metrics struct {
-	registrationErr   error
-	mu                sync.Mutex
-	gauges            map[string]*prometheus.GaugeVec
-	blocked, failure  *prometheus.GaugeVec
-	orders            *prometheus.CounterVec
-	machines, removes *prometheus.CounterVec
-	warnings          *prometheus.CounterVec
-	pollers           *prometheus.GaugeVec
-	reconcile, sweep  prometheus.Histogram
-	valid             prometheus.Gauge
-	stuckAfter        prometheus.Gauge
+	registrationErr  error
+	mu               sync.Mutex
+	gauges           map[string]*prometheus.GaugeVec
+	blocked, failure *prometheus.GaugeVec
+	orders           *prometheus.CounterVec
+	machines         *prometheus.CounterVec
+	warnings         *prometheus.CounterVec
+	pollers          *prometheus.GaugeVec
+	reconcile, sweep prometheus.Histogram
+	valid            prometheus.Gauge
+	stuckAfter       prometheus.Gauge
 }
 
 // New registers every metric in the catalogue. The caller supplies a fresh or
@@ -61,7 +61,6 @@ func New(reg prometheus.Registerer) *Metrics {
 		"stuck_agents",
 		"open_runs",
 		"target",
-		"ceiling",
 		"need",
 		"probe_mode"} {
 		m.gauges[name] = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pool_" + name,
@@ -88,9 +87,6 @@ func New(reg prometheus.Registerer) *Metrics {
 			"result"})).(*prometheus.CounterVec)
 	m.machines = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_machines_ordered_total",
 		Help: "Machines started"},
-		[]string{labelPool})).(*prometheus.CounterVec)
-	m.removes = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_would_remove_total",
-		Help: "Shrink log lines"},
 		[]string{labelPool})).(*prometheus.CounterVec)
 	m.warnings = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_warnings_total",
 		Help: "Hub findings"},
@@ -121,7 +117,6 @@ func (m *Metrics) ObservePool(f pipeline.PoolFacts,
 	v pipeline.Verdict,
 	intent pipeline.Intent,
 	target,
-	ceiling,
 	need int,
 	now time.Time) {
 	m.mu.Lock()
@@ -134,7 +129,6 @@ func (m *Metrics) ObservePool(f pipeline.PoolFacts,
 		"stuck_agents": float64(f.StuckAgents),
 		"open_runs":    float64(len(f.Open)),
 		"target":       float64(target),
-		"ceiling":      float64(ceiling),
 		"need":         float64(need)}
 	probe := false
 	switch i := intent.(type) {
@@ -200,7 +194,6 @@ func (m *Metrics) Order(pool string, mode pipeline.Mode, result string, started 
 	m.orders.WithLabelValues(pool, label, result).Inc()
 	m.machines.WithLabelValues(pool).Add(float64(started))
 }
-func (m *Metrics) WouldRemove(pool string)           { m.removes.WithLabelValues(pool).Inc() }
 func (m *Metrics) Warning(kind string)               { m.warnings.WithLabelValues(kind).Inc() }
 func (m *Metrics) SetConfigValid(valid bool)         { m.valid.Set(flag(valid)) }
 func (m *Metrics) ReconcileDuration(d time.Duration) { m.reconcile.Observe(d.Seconds()) }
@@ -221,7 +214,6 @@ func (m *Metrics) ForgetPool(pool string) {
 	m.failure.DeletePartialMatch(labels)
 	m.orders.DeletePartialMatch(labels)
 	m.machines.DeleteLabelValues(pool)
-	m.removes.DeleteLabelValues(pool)
 }
 
 // RegistrationError reports registry conflicts without panicking. Controller.New

@@ -168,11 +168,11 @@ func TestGoldenSample(t *testing.T) {
 	hub.WorkflowQueue = "install-server-workflow"
 	hub.SegmentQueue = "segment-lifecycle-activity"
 	want := config.Config{HubConfig: hub, Defaults: config.PoolConfig{
-		LowPct: 15, HighPct: 30, MinFree: 2, MinBand: 1, MaxOpenRunsPerPool: 15, ProbeInterval: 20 * time.Minute,
+		HighPct: 30, MinFree: 2, MaxOpenRunsPerPool: 15, ProbeInterval: 20 * time.Minute,
 		DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour,
 	}, Pools: map[string]config.PoolOverride{
 		"32-128-zone-1": {MinFree: new(5), MaxOpenRunsPerPool: new(8)},
-		"16-64-zone-2":  {Paused: new(true)}, "8-32-zone-1": {LowPct: new(25), DryRunGrow: new(true)},
+		"16-64-zone-2":  {Paused: new(true)}, "8-32-zone-1": {HighPct: new(25), DryRunGrow: new(true)},
 	}}
 	if diff := cmp.Diff(want, c); diff != "" {
 		t.Fatal(diff)
@@ -186,10 +186,8 @@ func TestMergeEveryField(t *testing.T) {
   paused: true
 pools:
   test:
-    lowPct: 0
     highPct: 0
     minFree: 0
-    minBand: 2
     maxOpenRunsPerPool: 1
     probeInterval: 1h
     drawGrace: 1s
@@ -201,7 +199,7 @@ pools:
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := config.PoolConfig{LowPct: 0, HighPct: 0, MinFree: 0, MinBand: 2, MaxOpenRunsPerPool: 1,
+	want := config.PoolConfig{HighPct: 0, MinFree: 0, MaxOpenRunsPerPool: 1,
 		ProbeInterval: time.Hour, DrawGrace: time.Second, FailureMemory: time.Hour, SettlingMax: time.Minute}
 	if diff := cmp.Diff(want, c.ForPool("test")); diff != "" {
 		t.Fatal(diff)
@@ -225,8 +223,8 @@ func TestValidatePoolRules(t *testing.T) {
 		field     string
 		bad, good any
 	}{
-		{"LowPct", -1, 0}, {"HighPct", -1, 30}, {"LowPct", 31, 30},
-		{"MinFree", -1, 0}, {"MinBand", 0, 1}, {"MaxOpenRunsPerPool", 0, 1},
+		{"HighPct", -1, 30},
+		{"MinFree", -1, 0}, {"MaxOpenRunsPerPool", 0, 1},
 		{"MaxOpenRunsPerPool", 101, 100},
 		{"ProbeInterval", time.Duration(0), time.Minute * 3},
 		{"DrawGrace", time.Duration(0), time.Second}, {"FailureMemory", time.Duration(0), time.Hour},
@@ -321,9 +319,9 @@ func TestValidationCollectsAllProblems(t *testing.T) {
 	c.HubName = ""
 	c.Interval = 0
 	c.Defaults.MinFree = -1
-	c.Pools = map[string]config.PoolOverride{"z": {LowPct: new(-2)}, "a": {MinBand: new(0)}}
+	c.Pools = map[string]config.PoolOverride{"z": {HighPct: new(-2)}, "a": {MinFree: new(-3)}}
 	err := c.Validate()
-	requireError(t, err, "hubName", "interval", "defaults", "minFree", `pool "z"`, "lowPct", `pool "a"`, "minBand")
+	requireError(t, err, "hubName", "interval", "defaults", "minFree", `pool "z"`, "highPct", `pool "a"`, "minFree")
 	joined, ok := err.(interface{ Unwrap() []error })
 	if !ok || len(joined.Unwrap()) < 3 {
 		t.Fatal("must join every problem")
@@ -356,5 +354,28 @@ segmentQueue: s
 		TemporalAddress: "localhost:7233", TemporalNamespace: "custom", ActivityQueue: "a", WorkflowQueue: "w", SegmentQueue: "s"}
 	if diff := cmp.Diff(want, c.HubConfig); diff != "" {
 		t.Fatal(diff)
+	}
+}
+
+func TestRemovedPoolKeysRejected(t *testing.T) {
+	for _, path := range []string{"defaults", "pools.test"} {
+		for _, key := range []string{"lowPct", "minBand"} {
+			for _, value := range []string{"0", "null", "15"} {
+				t.Run(path+"."+key+"="+value, func(t *testing.T) {
+					suffix := fmt.Sprintf("defaults: {%s: %s}\n", key, value)
+					if path == "pools.test" {
+						suffix = fmt.Sprintf("pools: {test: {%s: %s}}\n", key, value)
+					}
+					_, err := config.Load([]byte(minimal + suffix))
+					message := path + "." + key + " was removed: use highPct as the single target buffer percentage; delete lowPct"
+					if key == "minBand" {
+						message = path + "." + key + " was removed: the controller no longer has a ceiling; delete minBand"
+					}
+					if err == nil || err.Error() != message {
+						t.Fatalf("got %v, want %s", err, message)
+					}
+				})
+			}
+		}
 	}
 }

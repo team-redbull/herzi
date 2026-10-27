@@ -1,3 +1,5 @@
+> **Historical, verbatim review.** The ceiling, minBand, two-buffer formulas and age-only proof examples below describe the reviewed revision and its defects. The review is preserved verbatim; current behavior is the [add-only design](../design/herzi-design.md), with fixes recorded separately.
+
 # Independent review, round 2: findings
 
 Source: a second, independent Codex review of the whole tree (read-only, run after the author's own

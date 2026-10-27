@@ -14,10 +14,8 @@ activityQueue: server-lifecycle-activity-ocp4-example
 workflowQueue: install-server-workflow
 segmentQueue: segment-lifecycle-activity
 defaults:
-  lowPct: 15
   highPct: 30
   minFree: 2
-  minBand: 1
   maxOpenRunsPerPool: 15
   probeInterval: "20m"
   drawGrace: "2m"
@@ -28,4 +26,5 @@ defaults:
 pools:
   "32-128-zone-1": {minFree: 5, maxOpenRunsPerPool: 8, dryRunGrow: true}
   "16-64-zone-2": {paused: true, dryRunGrow: true}
-  "8-32-zone-1": {lowPct: 25, dryRunGrow: true}
+  # This pool uses a 25% target buffer.
+  "8-32-zone-1": {highPct: 25, dryRunGrow: true}

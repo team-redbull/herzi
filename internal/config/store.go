@@ -72,10 +72,8 @@ func clonePools(pools map[string]PoolOverride) map[string]PoolOverride {
 	}
 	out := make(map[string]PoolOverride, len(pools))
 	for name, p := range pools {
-		p.LowPct = clonePointer(p.LowPct)
 		p.HighPct = clonePointer(p.HighPct)
 		p.MinFree = clonePointer(p.MinFree)
-		p.MinBand = clonePointer(p.MinBand)
 		p.MaxOpenRunsPerPool = clonePointer(p.MaxOpenRunsPerPool)
 		p.ProbeInterval = clonePointer(p.ProbeInterval)
 		p.DrawGrace = clonePointer(p.DrawGrace)

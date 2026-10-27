@@ -67,12 +67,12 @@ func TestF7TimingRelationships(t *testing.T) {
 }
 
 func TestF10InvalidPoolDoesNotRejectPauseUpdate(t *testing.T) {
-	data := []byte(minimal + "pools: {a: {paused: true}, b: {minBand: 0}, c: {}}\n")
+	data := []byte(minimal + "pools: {a: {paused: true}, b: {highPct: -1}, c: {}}\n")
 	c, err := config.Load(data)
 	require.NoError(t, err)
 	require.True(t, c.ForPool("a").Paused)
 	require.Len(t, c.PoolErrors(), 1)
-	require.ErrorContains(t, c.PoolErrors()["b"], "minBand")
+	require.ErrorContains(t, c.PoolErrors()["b"], "highPct")
 	s := config.NewStore(validConfig(t))
 	require.NoError(t, s.Update(data))
 	require.True(t, s.Snapshot().ForPool("a").Paused)

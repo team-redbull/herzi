@@ -107,7 +107,7 @@ func TestStatusMappingAndIDs(t *testing.T) {
 		assert.Empty(t, run, "Describe must use latest run")
 		slot, err := strconv.Atoi(id[strings.LastIndex(id, "_")+1:])
 		assert.NoError(t, err)
-		assert.Equal(t, ids.PoolSlot("ocp4-hub", "pool", slot), id)
+		assert.Equal(t, "install-server-ocp4-hub_pool_"+strconv.Itoa(slot), id)
 		r := execution(statuses[slot-1].sdk, "run")
 		r.WorkflowExecutionInfo.StartTime = timestamppb.New(started)
 		r.WorkflowExecutionInfo.CloseTime = timestamppb.New(closed)

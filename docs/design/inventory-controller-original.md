@@ -1,3 +1,5 @@
+> **Superseded historical input.** This original design records the former low/high buffers, removal and cooldown proposals. None are current instructions or future commitments. The [current add-only design](herzi-design.md) is authoritative; this file is retained as design history.
+
 # Inventory Controller
 
 **What:** Keeps the pool of ready worker nodes matched to what tenant clusters are asking for.

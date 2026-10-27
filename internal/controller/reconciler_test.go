@@ -169,7 +169,7 @@ func TestReconcileDecisions(t *testing.T) {
 		want         int
 		dry          bool
 	}{
-		{name: "steady", demand: 4, agents: 6}, {name: "grow", demand: 4, agents: 1, want: 5}, {name: "capped", demand: 50, want: 15}, {name: "open headroom", demand: 50, open: 12, want: 3}, {name: "running subtracted", demand: 4, open: 2, want: 4}, {name: "dry", demand: 4, want: 0, dry: true}, {name: "remove", agents: 8},
+		{name: "steady", demand: 4, agents: 6}, {name: "grow", demand: 4, agents: 1, want: 5}, {name: "capped", demand: 50, want: 15}, {name: "open headroom", demand: 50, open: 12, want: 3}, {name: "running subtracted", demand: 4, open: 2, want: 4}, {name: "dry", demand: 4, want: 0, dry: true}, {name: "above target", agents: 8},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := testConfig()
@@ -191,8 +191,9 @@ func TestReconcileDecisions(t *testing.T) {
 			if tc.dry {
 				require.Equal(t, 1.0, metric(t, f.reg, "herzi_orders_total", map[string]string{"result": "dry_run"}))
 			}
-			if tc.name == "remove" {
-				require.Equal(t, 1.0, metric(t, f.reg, "herzi_would_remove_total", nil))
+			if tc.name == "above target" {
+				require.Equal(t, 2.0, metric(t, f.reg, "herzi_pool_target", nil))
+				require.Zero(t, metric(t, f.reg, "herzi_pool_need", nil))
 			}
 		})
 	}
@@ -224,7 +225,7 @@ func TestBlockedPools(t *testing.T) {
 			case "bad selector":
 				require.NoError(t, unstructured.SetNestedStringMap(np.Object, map[string]string{kube.LabelInfraEnv: "p", "extra": "x"}, "spec", "platform", "agent", "agentLabelSelector", "matchLabels"))
 			case "invalid pool config":
-				cfg.Defaults.MinBand = 0
+				cfg.Defaults.HighPct = -1
 			case "malformed Agent":
 				a := agent("bad", "p")
 				a.Object["spec"] = map[string]any{"approved": "oops"}
@@ -491,4 +492,25 @@ func TestFailedSlotsResolvedBySweep(t *testing.T) {
 	f.sweep.result.Slots = []pipeline.SlotRun{{Slot: 1, Status: pipeline.StatusRunning, Started: f.now}, {Slot: 2, Status: pipeline.StatusRunning, Started: f.now}}
 	f.reconcile(t, "p")
 	require.Len(t, f.install.requests, 1)
+}
+
+func TestReconcileUsesHighPctTarget(t *testing.T)              { assertHighPctTarget(t, 18, 3) }
+func TestAssignedExceedsDemandCanStillNeedBuffer(t *testing.T) { assertHighPctTarget(t, 21, 0) }
+func assertHighPctTarget(t *testing.T, assigned, claimable int) {
+	t.Helper()
+	objects := []client.Object{infra("p"), node("workers", "p", 20)}
+	for i := 0; i < assigned+claimable; i++ {
+		a := agent(fmt.Sprint(i), "p")
+		if i < assigned {
+			require.NoError(t, unstructured.SetNestedMap(a.Object, map[string]any{"name": "cluster"}, "spec", "clusterDeploymentName"))
+		}
+		objects = append(objects, a)
+	}
+	f := setup(t, testConfig(), objects...)
+	f.reconcile(t, "p")
+	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 5}}, f.install.requests)
+	require.Equal(t, 26.0, metric(t, f.reg, "herzi_pool_target", nil))
+	require.Equal(t, 5.0, metric(t, f.reg, "herzi_pool_need", nil))
+	require.Equal(t, float64(assigned), metric(t, f.reg, "herzi_pool_assigned", nil))
+	require.Equal(t, float64(claimable), metric(t, f.reg, "herzi_pool_claimable", nil))
 }

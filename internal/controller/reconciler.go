@@ -198,19 +198,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	switch i := intent.(type) {
 	case pipeline.Hold:
 		log.FromContext(ctx).V(1).Info("Holding pool", "pool", req.Name, "reason", i.Reason)
-	case pipeline.WouldRemove:
-		log.FromContext(ctx).Info("Would remove machines",
-			"pool",
-			req.Name,
-			"surplus",
-			i.Surplus,
-			"total",
-			i.Total,
-			"target",
-			i.Target,
-			"ceiling",
-			i.Ceiling)
-		r.Metrics.WouldRemove(req.Name)
 	case pipeline.Grow:
 		result, wakeUntil, exists, retErr = r.grow(ctx, req, cfg, now, started, raw, i)
 		return result, retErr
@@ -229,10 +216,8 @@ func (r *Reconciler) observe(f pipeline.PoolFacts,
 	i pipeline.Intent,
 	p config.PoolConfig,
 	now time.Time) {
-	low := max(p.MinFree, (p.LowPct*f.Demand+50)/100)
-	high := max(low+p.MinBand, (p.HighPct*f.Demand+50)/100)
-	target, ceiling := f.Demand+low, f.Demand+high
-	r.Metrics.ObservePool(f, v, i, target, ceiling, max(0, target-f.Assigned-f.Claimable-f.Settling-len(f.Open)), now)
+	_, target := pipeline.Target(f.Demand, p)
+	r.Metrics.ObservePool(f, v, i, target, max(0, target-f.Assigned-f.Claimable-f.Settling-len(f.Open)), now)
 }
 func (r *Reconciler) forget(pool string) {
 	r.Metrics.ForgetPool(pool)
