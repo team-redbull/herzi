@@ -145,7 +145,7 @@ func TestMalformedFields(t *testing.T) {
 		{"spec.clusterRef", false, 2}, {"spec.clusterRef.name", 42.0, 2}, {"status.debugInfo.state", true, 0}, {"status.conditions", false, 0},
 		{"status.conditions", []any{false}, 0}, {"status.conditions", []any{map[string]any{"type": true}}, 0},
 		{"status.conditions", []any{map[string]any{"status": false}}, 0}, {"status.conditions", []any{map[string]any{"lastTransitionTime": "invalid"}}, 0},
-		{"spec.replicas", "4", 1}, {"spec.replicas", 1.5, 1}, {"spec.replicas", int64(math.MaxInt32) + 1, 1}, {"spec.replicas", float64(math.MaxInt32) + 1, 1}, {"spec.replicas", math.NaN(), 1},
+		{"spec.replicas", int64(-10), 1}, {"spec.replicas", int64(math.MinInt32), 1}, {"spec.replicas", "4", 1}, {"spec.replicas", 1.5, 1}, {"spec.replicas", int64(math.MaxInt32) + 1, 1}, {"spec.replicas", float64(math.MaxInt32) + 1, 1}, {"spec.replicas", math.NaN(), 1},
 		{"spec.autoScaling", true, 1}, {"spec.platform.type", true, 1}, {"spec.platform.agent.agentLabelSelector.matchLabels", false, 1}, {"spec.platform.agent.agentLabelSelector.matchExpressions", false, 1}, {"spec.pausedUntil", true, 1},
 	}
 	for i, tc := range cases {
@@ -169,7 +169,7 @@ func TestMalformedFields(t *testing.T) {
 	}
 }
 func TestParserBoundaries(t *testing.T) {
-	for _, value := range []any{int32(4), int64(0), int64(math.MaxInt32), int64(math.MinInt32), float64(4)} {
+	for _, value := range []any{int32(4), int64(0), int64(math.MaxInt32), float64(4)} {
 		u := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"replicas": value}}}
 		n, err := ParseNodePool(u, testNow)
 		if err != nil || n.Replicas == nil {

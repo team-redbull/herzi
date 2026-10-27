@@ -38,6 +38,13 @@ The default target buffer intentionally doubles from 15% to 30%: demand 20 previ
 had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
 to retain the old target behavior. The `minFree` floor still protects small pools.
 
+Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
+must be non-negative). Invalid defaults reject the document; invalid merged pool
+settings block only that pool with `config_invalid`. Summed eligible demand above
+10,000,000 blocks its pool with an `implausible demand` problem. Target and supply
+arithmetic is checked even for inputs outside these limits: an unrepresentable
+calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot grow.
+
 Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
 are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
 after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
@@ -150,7 +157,7 @@ Semantic pool configuration errors publish with other changes and use
 `failureMemory >= 2*probeInterval`, `drawGrace < probeInterval`,
 `settlingMax >= probeInterval`, and `interval <= probeInterval` for defaults and every pool.
 Acquisition proof uses a completed `acquire_servers` activity, read lazily from run-pinned history.
-The alert compares `herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds`.
+The alert compares `herzi_oldest_open_run_seconds > ignoring(pool) group_left herzi_stuck_after_seconds`.
 
 The state annotation survives slot reuse and restarts; running recovery proof requires a
 post-failure start, age >= drawGrace and completed acquire_servers (or post-failure workflow

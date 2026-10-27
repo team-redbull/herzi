@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -20,63 +21,35 @@ func (e *RemovedKeyError) Error() string {
 }
 
 func removedPoolKeys(data []byte) error {
-	var doc yaml.Node
+	// Decode once into generic maps: yaml.v3 resolves aliases and merge sequences,
+	// rejecting cyclic aliases itself. Explicit keys shadow merged keys; only the
+	// effective document counts, just as in the real configuration decoder.
+	var doc map[string]any
 	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&doc); err != nil {
 		return fmt.Errorf("decode config: %w", err)
 	}
-	if len(doc.Content) == 0 {
-		return nil
+	if err := removedKeysAt(doc["defaults"], "defaults"); err != nil {
+		return err
 	}
-	root := doc.Content[0]
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		key, value := root.Content[i].Value, root.Content[i+1]
-		switch key {
-		case "defaults":
-			if err := removedKeysAt(value, "defaults", make(map[*yaml.Node]bool)); err != nil {
-				return err
-			}
-		case "pools":
-			if value.Kind != yaml.MappingNode {
-				continue
-			}
-			for j := 0; j+1 < len(value.Content); j += 2 {
-				name := safePoolName(value.Content[j].Value)
-				if err := removedKeysAt(value.Content[j+1], "pools."+name, make(map[*yaml.Node]bool)); err != nil {
-					return err
-				}
-			}
+	pools, _ := doc["pools"].(map[string]any)
+	names := make([]string, 0, len(pools))
+	for name := range pools {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		if err := removedKeysAt(pools[name], "pools."+safePoolName(name)); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func removedKeysAt(node *yaml.Node, path string, seen map[*yaml.Node]bool) error {
-	if node == nil || seen[node] {
-		return nil
-	}
-	seen[node] = true
-	if node.Kind == yaml.AliasNode {
-		return removedKeysAt(node.Alias, path, seen)
-	}
-	if node.Kind == yaml.SequenceNode {
-		for _, child := range node.Content {
-			if err := removedKeysAt(child, path, seen); err != nil {
-				return err
-			}
-		}
-	}
-	if node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		if key == "lowPct" || key == "minBand" {
+func removedKeysAt(value any, path string) error {
+	fields, _ := value.(map[string]any)
+	for _, key := range []string{"lowPct", "minBand"} {
+		if _, present := fields[key]; present {
 			return &RemovedKeyError{path: path + "." + key, key: key}
-		}
-		if key == "<<" {
-			if err := removedKeysAt(node.Content[i+1], path, seen); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

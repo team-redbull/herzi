@@ -53,7 +53,11 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 		case np.Replicas == nil:
 			f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": no replicas (autoscaling?)"})
 		default:
-			f.Demand += int(*np.Replicas)
+			if *np.Replicas < 0 || int(*np.Replicas) > 10_000_000-f.Demand {
+				f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": implausible demand"})
+			} else {
+				f.Demand += int(*np.Replicas)
+			}
 		}
 		if msg != "" {
 			warnings = append(warnings, Warning{Object: object, Msg: msg})

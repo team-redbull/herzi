@@ -125,7 +125,7 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | drawGrace | 2m | Pool | Minimum age of a post-failure Running run with completed acquire_servers |
 | failureMemory | 6h | Pool | Closed failure evidence window |
 | settlingMax | 60m | Pool | Unclaimable Agent settling allowance |
-| dryRunGrow | false | Pool | Log WOULD INSTALL without posting |
+| dryRunGrow | false | Pool | Log Would install without posting |
 | paused | false | Pool | Observe but never order |
 | defaults | Pool defaults above | Hub structure | Base for every listed pool |
 | pools | Empty; no managed pools | Hub structure | InfraEnv name to pool override mapping |
@@ -133,7 +133,7 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 See the complete [sample](config/samples/herzi-config.yaml), including all Temporal
 fields in the shared config contract. TLS paths and API bearer token are supplied
 via Secret mounts/environment, not YAML. `maxSlots` must equal 100. Validate
-`highPct >= 0`, `minFree >= 0`, `1 <= maxOpenRunsPerPool <= 100`, positive durations,
+`0 <= highPct <= 1000`, `0 <= minFree <= 100000`, `1 <= maxOpenRunsPerPool <= 100`, positive durations,
 `failureMemory >= 2*probeInterval`, `interval <= probeInterval`,
 `settlingMax >= probeInterval`, and `drawGrace < probeInterval`, for defaults and merged pools.
 
@@ -208,6 +208,13 @@ With `highPct: 30` and `minFree: 2`:
 The default target buffer intentionally doubles from 15% to 30%: demand 20 previously
 had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
 to retain the old target behavior. The `minFree` floor still protects small pools.
+
+Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
+must be non-negative). Invalid defaults reject the document; invalid merged pool
+settings block only that pool with `config_invalid`. Summed eligible demand above
+10,000,000 blocks its pool with an `implausible demand` problem. Target and supply
+arithmetic is checked even for inputs outside these limits: an unrepresentable
+calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot grow.
 
 Each custom-buffer row uses `highPct: 0, minFree: <buffer>`; the demand-50 row
 uses defaults (`highPct: 30, minFree: 2`). Probe rows use the default timings.

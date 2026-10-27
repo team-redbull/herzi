@@ -52,6 +52,13 @@ The default target buffer intentionally doubles from 15% to 30%: demand 20 previ
 had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
 to retain the old target behavior. The `minFree` floor still protects small pools.
 
+Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
+must be non-negative). Invalid defaults reject the document; invalid merged pool
+settings block only that pool with `config_invalid`. Summed eligible demand above
+10,000,000 blocks its pool with an `implausible demand` problem. Target and supply
+arithmetic is checked even for inputs outside these limits: an unrepresentable
+calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot grow.
+
 **What each supply term means**
 
 | Term | Meaning |
@@ -178,8 +185,12 @@ It never blocks other pools.
 Only pools listed in the config are managed. A pool can also be paused with an annotation or a config
 flag. The controller still reads and reports it, but never orders.
 
+TimedOut runs have no failure type. The sweeper sets `FailType = pipeline.FailUnknown`
+(`"unknown"`) without reading failure history. MergeState and Decide treat this as
+unknown failure evidence, preventing Full spending and allowing only scheduled probes.
+
 ### 15. Dry run
-With `dryRunGrow: true` it logs "WOULD INSTALL" with the exact request instead of sending it.
+With `dryRunGrow: true` it logs "Would install" with the exact request instead of sending it.
 
 ---
 
@@ -255,7 +266,7 @@ type SlotRun struct {
     Status   string     // Running | Completed | Failed | TimedOut | Terminated | NotFound
     Started  time.Time
     Closed   time.Time  // zero while Running
-    FailType string     // Failed/TimedOut close history; unreadable history => unknown
+    FailType string     // Failed close history; unreadable history or TimedOut => unknown
     Acquired bool       // completed acquire_servers activity in this exact execution
 }
 
@@ -320,7 +331,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
         // Check again AFTER the uncached recheck; elapsed time cannot refresh an old sweep.
         if !raw.Sweep.ObservedAt.After(r.previousAttempt(key)) { break }
         g2.Need = min(g2.Need, i.Need)
-        if pc.DryRunGrow { log.Info("WOULD INSTALL", g2); break }
+        if pc.DryRunGrow { log.Info("Would install", g2); break }
         for _, ir := range pipeline.Plan(g2, pc, fresh) {
             // Persist pending deadline and, for Probe, its schedule BEFORE spending.
             // Independent cancellation-detached 10-second patch; failure means no POST.
@@ -516,7 +527,7 @@ defaults:
   drawGrace: 2m                     # minimum age for acquisition evidence to prove recovery
   failureMemory: 6h
   settlingMax: 60m                  # matches the install workflow's one-hour agent wait
-  dryRunGrow: true                  # rollout safeguard: log "WOULD INSTALL" instead of ordering
+  dryRunGrow: true                  # rollout safeguard: log "Would install" instead of ordering
   paused: false
 
 # ---- pools: OPT-IN, keyed by InfraEnv name; only the fields written here differ ----
@@ -540,7 +551,7 @@ func (c Config) ForPool(name string) PoolConfig {
 ```
 
 **Validation.** Hub `maxSlots` must equal 100. After merging defaults and overrides:
-`highPct >= 0`, `minFree >= 0`, `1 <= maxOpenRunsPerPool <= maxSlots`, durations > 0,
+`0 <= highPct <= 1000`, `0 <= minFree <= 100000`, `1 <= maxOpenRunsPerPool <= maxSlots`, durations > 0,
 `drawGrace < probeInterval`, `failureMemory >= 2*probeInterval`,
 `settlingMax >= probeInterval`, and hub `interval <= probeInterval`.
 Timing rules apply to defaults and every merged pool. Bad YAML, unknown keys, invalid durations,

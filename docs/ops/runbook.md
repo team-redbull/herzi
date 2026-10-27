@@ -112,7 +112,7 @@ An install slot has been open for more than the startup-configured `stuckAfter` 
 Confirm with the common kubectl/log commands and these exact PromQL queries:
 
 ```promql
-herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds
+herzi_oldest_open_run_seconds > ignoring(pool) group_left herzi_stuck_after_seconds
 herzi_stuck_after_seconds
 herzi_pool_open_runs{pool="32-128-zone-1"}
 ```

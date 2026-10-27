@@ -57,6 +57,22 @@ jobs:
           cache: true
       - name: Every tree renders, schemas validate when kubeconform exists
         run: make lint-manifests
+      # promtool is not on GitHub's runners. The version and the sha256 are pinned; the checksum is the one the
+      # Prometheus project publishes in the release's sha256sums.txt.
+      - name: Install promtool (pinned, checksum-verified)
+        env:
+          PROMETHEUS_VERSION: 3.15.1
+          PROMETHEUS_SHA256: 6a726885328ad9efebbf36e876ce2fb6225468a71fd1e7ce3ba666d5f4d97a84
+        run: |
+          set -euo pipefail
+          archive="prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${archive}"
+          echo "${PROMETHEUS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          install -m 0755 "$RUNNER_TEMP/prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool" /usr/local/bin/promtool
+      - name: The shipped alert rules pass their unit tests
+        run: make test-alerts
       - name: The default install grants the controller what it reads and patches
         run: make check-rbac
       - name: The committed role.yaml equals what the RBAC markers generate

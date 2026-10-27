@@ -121,6 +121,9 @@ func TestStatusMappingAndIDs(t *testing.T) {
 	for i, tc := range statuses {
 		assert.Equal(t, i+1, r.Slots[i].Slot)
 		assert.Equal(t, tc.want, r.Slots[i].Status)
+		if tc.want == pipeline.StatusTimedOut {
+			assert.Equal(t, pipeline.FailUnknown, r.Slots[i].FailType)
+		}
 		assert.Equal(t, started, r.Slots[i].Started)
 		if tc.want == pipeline.StatusRunning {
 			assert.True(t, r.Slots[i].Closed.IsZero())

@@ -20,7 +20,7 @@ the release gates, to be closed on a real hub before the first real order:
    `pausedUntil`, wipe-before-register ordering).
 4. **The hosted CI workflow** (it is written and every step maps to a Makefile target that runs locally).
 
-Roll out in this order: install with every pool at `dryRunGrow: true`; read the `WOULD INSTALL` lines and the
+Roll out in this order: install with every pool at `dryRunGrow: true`; read the `Would install` lines and the
 `herzi_pool_*` gauges for a few days; enable one small pool; then the rest. `make check-rbac` fails when the
 default install does not grant the controller what it reads (it caught a missing role once; it also runs in CI).
 
@@ -38,7 +38,7 @@ An empty pool mapping opts in with all defaults. Durations are strings such as
 Validation is strict: bad YAML, unknown keys, invalid duration syntax, hub settings or defaults
 reject the document (startup fails; reload keeps the last good snapshot). `maxSlots` must
 be exactly 100; tune load through `1 <= maxOpenRunsPerPool <= 100`.
-Defaults and merged pools require `highPct >= 0`, `minFree >= 0`, positive durations,
+Defaults and merged pools require `0 <= highPct <= 1000`, `0 <= minFree <= 100000`, positive durations,
 `failureMemory >= 2*probeInterval`, `interval <= probeInterval`,
 `settlingMax >= probeInterval`, and `drawGrace < probeInterval`.
 Invalid merged pool settings remain published with `PoolErrors` and block only that
@@ -88,6 +88,9 @@ keys are ignored. A Running run proves recovery only if it started after the fai
 reached drawGrace and has a completed `acquire_servers` activity in run-pinned history.
 A Completed workflow must also have started after the failure. Runtime alone supplies
 no proof. Failed history reads produce `class="unknown"`, preventing Full spending.
+TimedOut runs have no failure type; the sweeper assigns `pipeline.FailUnknown`
+(`"unknown"`) without reading failure history. MergeState and Decide retain that
+unknown failure evidence and prevent Full spending, allowing only scheduled probes.
 Only post-failure open work suppresses the next scheduled probe; all open work still
 counts against need and the open-run cap.
 
@@ -120,10 +123,19 @@ The default target buffer intentionally doubles from 15% to 30%: demand 20 previ
 had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
 to retain the old target behavior. The `minFree` floor still protects small pools.
 
+Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
+must be non-negative). Invalid defaults reject the document; invalid merged pool
+settings block only that pool with `config_invalid`. Summed eligible demand above
+10,000,000 blocks its pool with an `implausible demand` problem. Target and supply
+arithmetic is checked even for inputs outside these limits: an unrepresentable
+calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot grow.
+
 Open-run age is compared with the unlabeled `herzi_stuck_after_seconds` gauge,
 initialized before reconciliation from startup `stuckAfter` (default 2h). It is a
-process constant; changing the effective threshold requires restart. The rule uses
-`herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds`.
+process constant; changing the effective threshold requires restart. Prometheus adds
+scrape target labels (including job and instance); the rule matches those labels
+and ignores only pool, keeping each controller's threshold separate. The rule uses
+`herzi_oldest_open_run_seconds > ignoring(pool) group_left herzi_stuck_after_seconds`.
 
 ## Secrets, TLS and secure monitoring
 
@@ -185,34 +197,18 @@ NetworkPolicy ipBlocks automatically.
 
 ## Alert rule tests
 
-The Kubernetes PrometheusRule wraps native rule groups under `spec`; promtool cannot
-read that wrapper directly. From the repository root, with Python/PyYAML and promtool
-installed, extract the actual shipped rules to a temporary directory and run the tests:
+The shipped alert rules have promtool unit tests in `config/prometheus/herzi-alerts.test.yaml`. Run them with:
 
 ```bash
-python3 - <<'PYTEST'
-from pathlib import Path
-import shutil
-import subprocess
-import tempfile
-import yaml
-
-source = Path("config/prometheus")
-with tempfile.TemporaryDirectory(prefix="herzi-alerts-") as directory:
-    work = Path(directory)
-    rules = yaml.safe_load((source / "herzi-alerts.yaml").read_text())["spec"]
-    (work / "herzi-alerts.rules.yaml").write_text(yaml.safe_dump(rules))
-    shutil.copyfile(source / "herzi-alerts.test.yaml", work / "herzi-alerts.test.yaml")
-    subprocess.run(["promtool", "check", "rules", "herzi-alerts.rules.yaml"], cwd=work, check=True)
-    subprocess.run(["promtool", "test", "rules", "herzi-alerts.test.yaml"], cwd=work, check=True)
-PYTEST
-kubectl kustomize config/prometheus
+make test-alerts      # needs promtool on PATH; CI installs a pinned, checksum-verified one
 ```
 
-The tests cover configured stuck thresholds across multiple pools, three-hour excess
-bound capacity versus ordinary free spares, absent controller series after ten minutes,
-and paused/pending pools excluded from the blocked-pool alert. The test YAML is not
-a Kubernetes resource and is intentionally excluded from `kustomization.yaml`.
+promtool reads native rule groups, not the Kubernetes `PrometheusRule` wrapper, so `hack/test-alerts.sh` extracts
+`spec.groups` from the shipped file into a temporary directory and never modifies it. The tests cover configured stuck
+thresholds across several pools **and across two controller targets with different thresholds** (the series are
+matched by controller target, not by an empty key), bound capacity in excess of demand for three hours versus
+ordinary free spares, the controller's series going absent for ten minutes, and paused or pending pools being excluded from
+the blocked-pool alert. The test file is not a Kubernetes resource and is excluded from `kustomization.yaml`.
 
 ## Dry-run rollout
 
@@ -226,7 +222,7 @@ a Kubernetes resource and is intentionally excluded from `kustomization.yaml`.
    `kubectl kustomize config/default`, and provision Secrets before the Pod starts.
    `make deploy IMG=<registry>/herzi:<version>` selects the image in the manager
    kustomization and applies the bundle to the current kubeconfig context.
-4. Compare `WOULD INSTALL` logs to NodePool replicas, assigned/claimable/settling
+4. Compare `Would install` logs to NodePool replicas, assigned/claimable/settling
    gauges and open slot histories. Simulate an empty-capacity failure, missing
    pollers, pause and invalid config; confirm blocks and last-good config behavior.
 5. Verify in Temporal that no previous-ID install runs are still open, as described below.

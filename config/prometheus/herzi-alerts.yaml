@@ -65,7 +65,7 @@ spec:
           supply.
         runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#stuck-agents
     - alert: HerziStuckOpenRuns
-      expr: herzi_oldest_open_run_seconds > on() group_left herzi_stuck_after_seconds
+      expr: herzi_oldest_open_run_seconds > ignoring(pool) group_left herzi_stuck_after_seconds
       for: 5m
       labels:
         severity: warning

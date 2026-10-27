@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -77,4 +78,42 @@ func TestF10InvalidPoolDoesNotRejectPauseUpdate(t *testing.T) {
 	require.NoError(t, s.Update(data))
 	require.True(t, s.Snapshot().ForPool("a").Paused)
 	require.True(t, s.Valid())
+}
+
+func TestTargetConfigCaps(t *testing.T) {
+	for _, tc := range []struct {
+		field string
+		limit int
+	}{
+		{"highPct", 1000}, {"minFree", 100000},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			for _, value := range []int{0, tc.limit, tc.limit + 1, 9223372036854775807} {
+				defaults := []byte(minimal + fmt.Sprintf("defaults: {%s: %d}\n", tc.field, value))
+				_, err := config.Load(defaults)
+				if value <= tc.limit {
+					require.NoError(t, err)
+				} else {
+					require.ErrorContains(t, err, fmt.Sprintf("%s: must be between 0 and %d", tc.field, tc.limit))
+				}
+				data := []byte(minimal + fmt.Sprintf("pools: {bad: {%s: %d}, healthy: {}}\n", tc.field, value))
+				c, err := config.Load(data)
+				require.NoError(t, err)
+				if value <= tc.limit {
+					require.Empty(t, c.PoolErrors())
+				} else {
+					require.Len(t, c.PoolErrors(), 1)
+					require.ErrorContains(t, c.PoolErrors()["bad"], tc.field)
+				}
+				store := config.NewStore(validConfig(t))
+				require.NoError(t, store.Update(data))
+				require.Equal(t, c, store.Snapshot())
+			}
+		})
+	}
+	c, err := config.Load([]byte(minimal + "defaults: {highPct: 1000, minFree: 100000}\npools: {p: {}}"))
+	require.NoError(t, err)
+	require.Empty(t, c.PoolErrors())
+	require.Equal(t, 1000, c.ForPool("p").HighPct)
+	require.Equal(t, 100000, c.ForPool("p").MinFree)
 }

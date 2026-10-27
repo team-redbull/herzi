@@ -148,6 +148,9 @@ func (s *Sweeper) describe(ctx context.Context, id string, slot int) (*pipeline.
 	if status != pipeline.StatusRunning && info.CloseTime != nil {
 		run.Closed = info.CloseTime.AsTime()
 	}
+	if status == pipeline.StatusTimedOut {
+		run.FailType = pipeline.FailUnknown
+	}
 	if status == pipeline.StatusFailed {
 		run.FailType = s.failureType(ctx, runKey{id, info.GetExecution().GetRunId()})
 	}

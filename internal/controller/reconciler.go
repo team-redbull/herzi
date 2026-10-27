@@ -216,7 +216,7 @@ func (r *Reconciler) observe(f pipeline.PoolFacts,
 	i pipeline.Intent,
 	p config.PoolConfig,
 	now time.Time) {
-	_, target := pipeline.Target(f.Demand, p)
+	_, target, _ := pipeline.Target(f.Demand, p)
 	r.Metrics.ObservePool(f, v, i, target, max(0, target-f.Assigned-f.Claimable-f.Settling-len(f.Open)), now)
 }
 func (r *Reconciler) forget(pool string) {

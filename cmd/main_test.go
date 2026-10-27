@@ -206,7 +206,7 @@ func TestRemovedKeyReloadDiagnosticIsSafe(t *testing.T) {
 		{"pools: {'secret\\nvalue': {lowPct: secret}}", "pools.<invalid>.lowPct was removed"},
 	} {
 		entries = nil
-		err = store.Update([]byte(validConfig + tt.suffix))
+		err = store.Update([]byte(strings.Replace(validConfig, "pools: {p: {}}", "", 1) + tt.suffix))
 		require.Error(t, err)
 		handler(fmt.Errorf("secret wrapper: %w", err))
 		require.Empty(t, reload)
@@ -217,4 +217,57 @@ func TestRemovedKeyReloadDiagnosticIsSafe(t *testing.T) {
 	entries = nil
 	handler(errors.New("decoder secret"))
 	require.NotContains(t, strings.Join(entries, " "), "secret")
+}
+
+func TestMergedRemovedKeysStartupAndReload(t *testing.T) {
+	initial, err := config.Load([]byte(validConfig))
+	require.NoError(t, err)
+	base := strings.Replace(validConfig, "pools: {p: {}}", "", 1)
+	for _, tc := range []struct{ yaml, path, key string }{
+		{"defaults:\n  lowPct: 0", "defaults", "lowPct"},
+		{"defaults: {minBand: null}", "defaults", "minBand"},
+		{"pools: {p: &old {minBand: 0}, q: *old}", "pools.p", "minBand"},
+		{"defaults: {<<: {minBand: 0}}", "defaults", "minBand"},
+		{"<<: {defaults: {lowPct: 0}}", "defaults", "lowPct"},
+		{"pools: {<<: {p: {minBand: null}}}", "pools.p", "minBand"},
+		{"<<: &root {pools: {p: {lowPct: null}}}", "pools.p", "lowPct"},
+		{"<<: [{defaults: {minBand: null}}, {defaults: {highPct: 30}}]", "defaults", "minBand"},
+		{"pools: {<<: [{p: {minBand: 0}}, {q: {}}]}", "pools.p", "minBand"},
+		{"pools: {p: {<<: [{highPct: 30}, {minBand: 0}]}}", "pools.p", "minBand"},
+		{"pools:\n  <<: &pools\n    p:\n      lowPct: 0", "pools.p", "lowPct"},
+	} {
+		t.Run(tc.yaml, func(t *testing.T) {
+			want := tc.path + "." + tc.key + " was removed: the controller no longer has a ceiling; delete minBand"
+			if tc.key == "lowPct" {
+				want = tc.path + ".lowPct was removed: use highPct as the single target buffer percentage; delete lowPct"
+			}
+			store := config.NewStore(initial)
+			var entries []string
+			logger := logr.New(logCapture{entries: &entries})
+			reload := make(chan event.GenericEvent, 1)
+			handler := reloadHandler(initial.HubConfig, store, metrics.New(prometheus.NewRegistry()), reload, logger, "config.yaml")
+			data := []byte(base + tc.yaml)
+			err := store.Update(data)
+			var removed *config.RemovedKeyError
+			require.ErrorAs(t, err, &removed)
+			require.EqualError(t, err, want)
+			handler(fmt.Errorf("raw decoder secret: %w", err))
+			require.Len(t, entries, 1)
+			require.Contains(t, entries[0], want)
+			require.NotContains(t, entries[0], "secret")
+			require.NotContains(t, entries[0], "decode config")
+			require.Empty(t, reload)
+			require.Equal(t, initial, store.Snapshot())
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(path, data, 0600))
+			previousLog := setupLog
+			setupLog = logger
+			defer func() { setupLog = previousLog }()
+			entries = nil
+			require.Equal(t, 1, run([]string{"--config", path}))
+			require.Len(t, entries, 1)
+			require.Contains(t, entries[0], want)
+			require.Contains(t, entries[0], "The configuration file is invalid")
+		})
+	}
 }

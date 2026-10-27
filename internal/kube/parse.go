@@ -138,6 +138,9 @@ func ParseNodePool(u *unstructured.Unstructured, now time.Time) (NodePool, error
 		if n < math.MinInt32 || n > math.MaxInt32 {
 			r.fail(replicasPath, fmt.Errorf("outside int32 range"))
 		}
+		if n < 0 {
+			r.fail(replicasPath, fmt.Errorf("must be >= 0"))
+		}
 		if r.err == nil {
 			replicas := int32(n)
 			v.Replicas = &replicas

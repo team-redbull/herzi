@@ -128,3 +128,24 @@ func TestUnlabeledMalformedMap(t *testing.T) {
 	u = object(kube.NodePoolGVK, "tenant", "none")
 	require.Empty(t, f.r.mapNodePool(context.Background(), u))
 }
+
+func TestNegativeReplicasBlockOnlyTheirPool(t *testing.T) {
+	cfg := testConfig()
+	f := setup(t, cfg, infra("p"), infra("q"), node("positive", "p", 20),
+		node("negative", "p", -10), node("healthy", "q", 6))
+	raw, err := f.r.gather(t.Context(), f.c, cfg, "p", f.now, false)
+	require.NoError(t, err)
+	require.Len(t, raw.ReadErrs, 1)
+	require.Equal(t, pipeline.PoolKey("p"), raw.ReadErrs[0].Pool)
+	require.ErrorContains(t, raw.ReadErrs[0].Err, "spec.replicas: must be >= 0")
+	raw.Pollers = f.queues.result
+	facts := pipeline.Attribute(raw, cfg)
+	require.Equal(t, 20, facts["p"].Demand)
+	require.True(t, pipeline.Validate(facts["p"], raw, cfg.ForPool("p")).Blocked)
+	require.False(t, pipeline.Validate(facts["q"], raw, cfg.ForPool("q")).Blocked)
+	f.reconcile(t, "p")
+	require.Empty(t, f.install.requests)
+	require.Equal(t, "read_error", f.r.reasons["p"])
+	f.reconcile(t, "q")
+	require.Equal(t, []pipeline.InstallRequest{{Key: "q", Count: 8}}, f.install.requests)
+}

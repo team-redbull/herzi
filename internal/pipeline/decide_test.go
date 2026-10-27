@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 )
 
@@ -73,7 +74,8 @@ func TestDecideDesignTable(t *testing.T) {
 func TestDecideBuffers(t *testing.T) {
 	for _, tt := range []struct{ d, buffer int }{{0, 2}, {4, 2}, {6, 2}, {10, 3}, {12, 4}, {20, 6}, {50, 15}} {
 		p := poolConfig()
-		buffer, target := Target(tt.d, p)
+		buffer, target, ok := Target(tt.d, p)
+		require.True(t, ok)
 		equal(t, buffer, tt.buffer)
 		equal(t, target, tt.d+tt.buffer)
 		equal(t, Decide(PoolFacts{Key: "a", Demand: tt.d}, p, clockTime()), Grow{Key: "a", Need: target, Mode: Full})
@@ -81,7 +83,8 @@ func TestDecideBuffers(t *testing.T) {
 	p := poolConfig()
 	p.MinFree = 0
 	p.HighPct = 10
-	buffer, target := Target(5, p)
+	buffer, target, ok := Target(5, p)
+	require.True(t, ok)
 	equal(t, buffer, 1)
 	equal(t, target, 6)
 }
@@ -152,7 +155,8 @@ func TestAtOrAboveTargetAlwaysHolds(t *testing.T) {
 func TestTargetBoundary(t *testing.T) {
 	p := poolConfig()
 	for _, demand := range []int{0, 4, 6, 10, 12, 20, 50} {
-		_, target := Target(demand, p)
+		_, target, ok := Target(demand, p)
+		require.True(t, ok)
 		for _, delta := range []int{-1, 0, 1} {
 			f := PoolFacts{Key: "a", Demand: demand, Claimable: target + delta}
 			var want Intent = Hold{Key: "a", Reason: HoldAtOrAboveTarget}
@@ -179,7 +183,8 @@ func TestZeroBuffer(t *testing.T) {
 	p := poolConfig()
 	p.HighPct = 0
 	p.MinFree = 0
-	buffer, target := Target(10, p)
+	buffer, target, ok := Target(10, p)
+	require.True(t, ok)
 	equal(t, buffer, 0)
 	equal(t, target, 10)
 	equal(t, Decide(PoolFacts{Key: "a", Demand: 10, Assigned: 10}, p, clockTime()), Hold{Key: "a", Reason: HoldAtOrAboveTarget})
