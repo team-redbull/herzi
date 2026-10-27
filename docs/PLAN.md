@@ -71,12 +71,13 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 | `herzi_pool_target` / `_ceiling` / `_need` | gauge | pool | the formula outputs |
 | `herzi_pool_blocked` | gauge 0/1 | pool, reason | pool blocked this pass |
 | `herzi_pool_probe_mode` | gauge 0/1 | pool | hardware looks missing |
-| `herzi_pool_failure_class` | gauge 0/1 | pool, class (`capacity`,`other`) | last failure class |
+| `herzi_pool_failure_class` | gauge 0/1 | pool, class (`capacity`,`other`,`unknown`) | last failure class |
 | `herzi_orders_total` | counter | pool, mode (`full`,`probe`), result (`started`,`short`,`ambiguous`,`rejected`,`dry_run`) | install requests |
 | `herzi_machines_ordered_total` | counter | pool | machines requested |
 | `herzi_would_remove_total` | counter | pool | shrink log lines |
 | `herzi_reconcile_duration_seconds` | histogram | — | per reconcile |
 | `herzi_sweep_duration_seconds` | histogram | — | per pool sweep |
+| `herzi_stuck_after_seconds` | gauge | none | startup-configured open-run alert threshold in seconds (process constant) |
 | `herzi_oldest_open_run_seconds` | gauge | pool | for the stuck-run alert |
 | `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`) | poller counts |
 | `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, ...) |
@@ -96,3 +97,18 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 - Container is distroless, non-root, read-only root filesystem, seccomp RuntimeDefault, all capabilities dropped.
 - Metrics, probes, RBAC minimal (get/list/watch on the three kinds, get/update/patch on InfraEnv metadata for the block annotation, Lease), leader election with `LeaderElectionReleaseOnCancel`.
 - README, runbook and alert rules exist.
+
+## Round 2 safety contracts
+
+The InfraEnv stores `herzi.redbull.io/state` (bounded durable failure/probe evidence) and
+`herzi.redbull.io/blocked-until` (pre-POST pending marker). Every attempted POST invalidates its
+sweep; the next order requires an observation newer than the previous attempt, including the recheck.
+A malformed object blocks only its identifiable pool; unattributed malformed objects warn.
+Semantic pool configuration errors publish with other changes and use
+`herzi_pool_blocked{reason="config_invalid"}`. Document/hub/default errors retain the last good document.
+
+`maxSlots` must equal 100. Pool limits remain <= 100. Timing relations are
+`failureMemory >= 2*probeInterval`, `drawGrace < probeInterval`,
+`settlingMax >= probeInterval`, and `interval <= probeInterval` for defaults and every pool.
+Acquisition proof uses a completed `acquire_servers` activity, read lazily from run-pinned history.
+The alert compares `herzi_oldest_open_run_seconds > herzi_stuck_after_seconds`.

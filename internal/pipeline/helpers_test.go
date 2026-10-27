@@ -38,5 +38,5 @@ func closed(status, fail string, minutes int) SlotRun {
 	return SlotRun{Status: status, FailType: fail, Closed: clockTime().Add(-time.Duration(minutes) * time.Minute), Started: clockTime().Add(-time.Duration(minutes+1) * time.Minute)}
 }
 func running(minutes int) SlotRun {
-	return SlotRun{Status: StatusRunning, Started: clockTime().Add(-time.Duration(minutes) * time.Minute)}
+	return SlotRun{Status: StatusRunning, Acquired: true, Started: clockTime().Add(-time.Duration(minutes) * time.Minute)}
 }

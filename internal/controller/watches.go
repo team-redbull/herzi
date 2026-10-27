@@ -36,7 +36,7 @@ func (r *Reconciler) request(pool string) []reconcile.Request {
 	if pool == "" {
 		return nil
 	}
-	return []reconcile.Request{{NamespacedName: client.ObjectKey{Namespace: r.startup.AgentNamespace, Name: pool}}}
+	return []reconcile.Request{{Namespace: r.startup.AgentNamespace, Name: pool}}
 }
 func (r *Reconciler) mapAgent(_ context.Context, obj client.Object) []reconcile.Request {
 	if obj == nil {

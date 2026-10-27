@@ -31,10 +31,10 @@ func Decide(f PoolFacts, p config.PoolConfig, now time.Time) Intent {
 		return Hold{Key: f.Key, Reason: HoldInsideBand}
 	}
 	if failing, lastFail := hardwareLooksMissing(f, p, now); failing {
-		if running > 0 {
+		if hasPostFailureRun(f.Open, lastFail) {
 			return Hold{Key: f.Key, Reason: HoldProbeRunning}
 		}
-		if now.Sub(lastFail) < p.ProbeInterval {
+		if now.Before(MergeState(f.State, append(append([]SlotRun{}, f.Open...), f.Closed...), now, p).ProbeNotBefore) {
 			return Hold{Key: f.Key, Reason: HoldProbeWait}
 		}
 		return Grow{Key: f.Key, Need: 1, Mode: Probe}
@@ -43,52 +43,23 @@ func Decide(f PoolFacts, p config.PoolConfig, now time.Time) Intent {
 }
 
 func hardwareLooksMissing(f PoolFacts, p config.PoolConfig, now time.Time) (bool, time.Time) {
-	var capFail, lastSuccess time.Time
-	capFound := false
-	successFound := false
-	for _, r := range f.Closed {
-		if (r.Status == StatusFailed || r.Status == StatusTimedOut) && IsCapacityFailure(r.FailType) {
-			if !capFound || r.Closed.After(capFail) {
-				capFail = r.Closed
-				capFound = true
-			}
-		}
-		if r.Status == StatusCompleted && (!successFound || r.Closed.After(lastSuccess)) {
-			lastSuccess = r.Closed
-			successFound = true
+	s := MergeState(f.State, append(append([]SlotRun{}, f.Open...), f.Closed...), now, p)
+	last := s.CapFailAt
+	if !last.After(s.LastOKAt) {
+		last = time.Time{}
+	}
+	if len(s.OtherFails) >= 3 {
+		if t := s.OtherFails[len(s.OtherFails)-1].ClosedAt; t.After(last) {
+			last = t
 		}
 	}
-	// ASSUMPTION: "after the latest Completed run" compares close times. The
-	// non-capacity streak is independent of capacity evidence; both obey FailureMemory.
-	otherCount := 0
-	var otherFail time.Time
-	for _, r := range f.Closed {
-		if r.Status == StatusFailed && !IsCapacityFailure(r.FailType) && (!successFound || r.Closed.After(lastSuccess)) {
-			otherCount++
-			if otherCount == 1 || r.Closed.After(otherFail) {
-				otherFail = r.Closed
-			}
-		}
-	}
-	capFailing := capFound && now.Sub(capFail) <= p.FailureMemory && !hasProof(f, p, now, capFail)
-	// Old failures expire like capacity ones: otherwise three failures from days ago, with nothing
-	// completed since, would keep a long-idle pool in probe mode forever.
-	otherFailing := otherCount >= 3 && now.Sub(otherFail) <= p.FailureMemory && !hasProof(f, p, now, otherFail)
-	if otherFailing && (!capFailing || otherFail.After(capFail)) {
-		return true, otherFail
-	}
-	if capFailing {
-		return true, capFail
-	}
-	return false, time.Time{}
+	return !last.IsZero(), last
 }
 
-func hasProof(f PoolFacts, p config.PoolConfig, now, lastFail time.Time) bool {
-	for _, runs := range [][]SlotRun{f.Open, f.Closed} {
-		for _, r := range runs {
-			if r.Started.After(lastFail) && (r.Status == StatusCompleted || (r.Status == StatusRunning && now.Sub(r.Started) >= p.DrawGrace)) {
-				return true
-			}
+func hasPostFailureRun(runs []SlotRun, failure time.Time) bool {
+	for _, r := range runs {
+		if r.Started.After(failure) {
+			return true
 		}
 	}
 	return false

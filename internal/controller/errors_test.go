@@ -64,7 +64,7 @@ func TestAPIFailures(t *testing.T) {
 			} else {
 				f.r.Client = readClient{Client: f.c, reader: reader}
 			}
-			_, err := f.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Namespace: "inventory", Name: "p"}})
+			_, err := f.r.Reconcile(context.Background(), ctrl.Request{Namespace: "inventory", Name: "p"})
 			require.ErrorContains(t, errors.Unwrap(err), "API unavailable")
 			require.Empty(t, f.install.requests)
 		})

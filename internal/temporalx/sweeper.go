@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/team-redbull/herzi/internal/config"
 	"github.com/team-redbull/herzi/internal/ids"
 	"github.com/team-redbull/herzi/internal/pipeline"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -71,11 +72,12 @@ func (s *Sweeper) Sweep(ctx context.Context, pool pipeline.PoolKey) pipeline.Swe
 	started := time.Now()
 	result := s.sweep(ctx, pool)
 	s.mu.Lock()
-	entry.result = result
 	entry.at = s.opts.Now()
+	result.ObservedAt = entry.at
+	entry.result = result
 	entry.finished = true
 	// A canceled caller must not poison the next reconcile's cache.
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && s.pools[pool] == entry {
 		delete(s.pools, pool)
 	}
 	close(entry.done)
@@ -139,7 +141,7 @@ func (s *Sweeper) describe(ctx context.Context, id string, slot int) (*pipeline.
 	if err != nil {
 		return nil, fmt.Errorf("describe slot %s: %w", id, err)
 	}
-	run := &pipeline.SlotRun{Slot: slot, Status: status}
+	run := &pipeline.SlotRun{Slot: slot, Status: status, RunID: info.GetExecution().GetRunId()}
 	if info.StartTime != nil {
 		run.Started = info.StartTime.AsTime()
 	}
@@ -179,37 +181,43 @@ func (s *Sweeper) failureType(ctx context.Context, key runKey) string {
 	// Never read an unpinned latest run after describing a failed run: the slot
 	// could already have been reused by the route.
 	if key.run == "" {
-		return ""
+		return pipeline.FailUnknown
 	}
 	if value, ok := s.failures.get(key); ok {
 		return value
 	}
 	callCtx, cancel := context.WithTimeout(ctx, s.opts.PerCallTimeout)
 	defer cancel()
-	iter := s.opts.Client.GetWorkflowHistory(callCtx, key.workflow, key.run, false, enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT)
+	iter := s.opts.Client.GetWorkflowHistory(callCtx,
+		key.workflow,
+		key.run,
+		false,
+		enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT)
 	if iter == nil {
-		return ""
+		return pipeline.FailUnknown
 	}
 	for iter.HasNext() {
 		event, err := iter.Next()
 		if err != nil {
-			return ""
+			return pipeline.FailUnknown
 		}
 		attrs := event.GetWorkflowExecutionFailedEventAttributes()
 		if attrs == nil {
 			continue
 		}
-		value := ""
+		value := pipeline.FailUnknown
 		for failure := attrs.GetFailure(); failure != nil; failure = failure.GetCause() {
 			if app := failure.GetApplicationFailureInfo(); app != nil {
-				value = app.GetType()
+				if app.GetType() != "" {
+					value = app.GetType()
+				}
 				break
 			}
 		}
 		s.failures.put(key, value)
 		return value
 	}
-	return ""
+	return pipeline.FailUnknown
 }
 
 type runKey struct{ workflow, run string }
@@ -248,4 +256,61 @@ func (c *failureLRU) put(key runKey, value string) {
 		delete(c.entries, e.Value.(failureEntry).key)
 		c.order.Remove(e)
 	}
+}
+
+// Invalidate makes every subsequent caller obtain a new observation.
+func (s *Sweeper) Invalidate(pool pipeline.PoolKey) {
+	s.mu.Lock()
+	delete(s.pools, pool)
+	s.mu.Unlock()
+}
+
+// SweepWithState adds acquisition proof only for pools with capacity or unknown evidence.
+func (s *Sweeper) SweepWithState(ctx context.Context, pool pipeline.PoolKey,
+	state pipeline.State, p config.PoolConfig) pipeline.SweepResult {
+	result := s.Sweep(ctx, pool)
+	state = pipeline.MergeState(state, result.Slots, s.opts.Now(), p)
+	if state.CapFailAt.IsZero() || !state.CapFailAt.After(state.LastOKAt) {
+		return result
+	}
+	for i := range result.Slots {
+		r := &result.Slots[i]
+		if r.Status == pipeline.StatusRunning && s.opts.Now().Sub(r.Started) >= p.DrawGrace {
+			r.Acquired = s.acquired(ctx, runKey{ids.PoolSlot(s.opts.MCE, string(pool), r.Slot), r.RunID})
+		}
+	}
+	return result
+}
+
+func (s *Sweeper) acquired(ctx context.Context, key runKey) bool {
+	if key.run == "" {
+		return false
+	}
+	cacheKey := runKey{key.workflow + "/acquired", key.run}
+	if _, ok := s.failures.get(cacheKey); ok {
+		return true
+	}
+	callCtx, cancel := context.WithTimeout(ctx, s.opts.PerCallTimeout)
+	defer cancel()
+	iter := s.opts.Client.GetWorkflowHistory(callCtx, key.workflow, key.run, false,
+		enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
+	if iter == nil {
+		return false
+	}
+	scheduled := make(map[int64]bool)
+	// Bound both history size and elapsed time, including non-cooperative test iterators.
+	for n := 0; n < 100000 && callCtx.Err() == nil && iter.HasNext(); n++ {
+		e, err := iter.Next()
+		if err != nil {
+			return false
+		}
+		if a := e.GetActivityTaskScheduledEventAttributes(); a != nil {
+			scheduled[e.GetEventId()] = a.GetActivityType().GetName() == "acquire_servers"
+		}
+		if a := e.GetActivityTaskCompletedEventAttributes(); a != nil && scheduled[a.GetScheduledEventId()] {
+			s.failures.put(cacheKey, "yes")
+			return true
+		}
+	}
+	return false
 }

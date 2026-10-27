@@ -14,7 +14,6 @@ import (
 	"github.com/team-redbull/herzi/internal/metrics"
 	"github.com/team-redbull/herzi/internal/pipeline"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,12 +50,12 @@ var _ = Describe("Block after an unclear install", func() {
 			Skip("KUBEBUILDER_ASSETS is unset")
 		}
 		for _, name := range []string{"inventory", "tenant"} {
-			err := k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})
+			err := k8sClient.Create(ctx, &corev1.Namespace{Name: name})
 			Expect(client.IgnoreAlreadyExists(err)).To(Succeed())
 		}
 		deleteAfterSpec(infra("q"), node("workers-q", "q", 0))
 		initial := testConfig()
-		initial.Interval = time.Hour
+		initial.Interval = 10 * time.Minute // must stay <= probeInterval or the pool is config_invalid
 		initial.AmbiguousWait = time.Hour
 		store := config.NewStore(initial)
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
@@ -73,7 +72,7 @@ var _ = Describe("Block after an unclear install", func() {
 		}
 		r, err := New(Options{
 			Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Config: store,
-			Sweeper:   &sweepFake{},
+			Sweeper:   &sweepFake{now: time.Now}, // stamps each observation like the real sweeper
 			Queues:    &queuesFake{result: pipeline.PollerStatus{Activity: 1, Workflow: 1, Segment: 1}},
 			Installer: installer, Metrics: metrics.New(prometheus.NewRegistry()),
 		})

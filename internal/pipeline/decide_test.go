@@ -33,7 +33,7 @@ func TestDecideDesignTable(t *testing.T) {
 		{name: "11 probe due", d: 6, low: 2, high: 3, closed: []SlotRun{cap21}, want: Grow{Key: "a", Need: 1, Mode: Probe}},
 		{name: "12 young probe", d: 6, low: 2, high: 3, closed: []SlotRun{cap21}, open: []SlotRun{running(1)}, want: Hold{Key: "a", Reason: HoldProbeRunning}},
 		{name: "13 mature probe proves recovery", d: 6, low: 2, high: 3, closed: []SlotRun{cap21}, open: []SlotRun{running(3)}, want: Grow{Key: "a", Need: 7, Mode: Full}},
-		{name: "14 partial batch no proof", d: 10, a: 4, low: 2, high: 3, closed: []SlotRun{{Status: StatusFailed, FailType: FailServerReserved, Closed: clockTime().Add(-10*time.Minute + 20*time.Second)}, {Status: StatusFailed, FailType: FailServerReserved, Closed: clockTime().Add(-10*time.Minute + 20*time.Second)}, {Status: StatusFailed, FailType: FailServerReserved, Closed: clockTime().Add(-10*time.Minute + 20*time.Second)}, {Status: StatusFailed, FailType: FailServerReserved, Closed: clockTime().Add(-10*time.Minute + 20*time.Second)}}, open: []SlotRun{running(10), running(10), running(10), running(10), running(10), running(10)}, want: Hold{Key: "a", Reason: HoldProbeRunning}},
+		{name: "14 partial batch no proof", d: 10, a: 4, low: 2, high: 3, closed: []SlotRun{{Status: StatusFailed, FailType: FailServerReserved, Closed: clockTime().Add(-10*time.Minute + 20*time.Second)}, {Status: StatusFailed, FailType: FailServerReserved, Closed: clockTime().Add(-10*time.Minute + 20*time.Second)}, {Status: StatusFailed, FailType: FailServerReserved, Closed: clockTime().Add(-10*time.Minute + 20*time.Second)}, {Status: StatusFailed, FailType: FailServerReserved, Closed: clockTime().Add(-10*time.Minute + 20*time.Second)}}, open: []SlotRun{running(10), running(10), running(10), running(10), running(10), running(10)}, want: Hold{Key: "a", Reason: HoldProbeWait}},
 		{name: "15 completed proof", d: 6, c: 1, low: 2, high: 3, closed: []SlotRun{closed(StatusFailed, FailServerNotAvailable, 30), closed(StatusCompleted, "", 5)}, want: Grow{Key: "a", Need: 7, Mode: Full}},
 		{name: "16 completed started before failure", d: 6, low: 2, high: 3, closed: []SlotRun{closed(StatusFailed, FailServerNotAvailable, 30), {Status: StatusCompleted, Started: clockTime().Add(-40 * time.Minute), Closed: clockTime().Add(-5 * time.Minute)}}, want: Grow{Key: "a", Need: 1, Mode: Probe}},
 		{name: "17 two other failures", d: 6, low: 2, high: 3, closed: []SlotRun{closed(StatusFailed, "broken", 30), closed(StatusFailed, "broken", 25)}, want: Grow{Key: "a", Need: 8, Mode: Full}},
@@ -107,7 +107,7 @@ func TestProbeProofTable(t *testing.T) {
 		{"probe still running after grace", []SlotRun{failure}, []SlotRun{running(3)}, Grow{Key: "a", Need: 7, Mode: Full}},
 		{"probe at grace", []SlotRun{failure}, []SlotRun{running(2)}, Grow{Key: "a", Need: 7, Mode: Full}},
 		{"probe before grace", []SlotRun{failure}, []SlotRun{{Status: StatusRunning, Started: clockTime().Add(-p.DrawGrace + time.Nanosecond)}}, Hold{Key: "a", Reason: HoldProbeRunning}},
-		{"running started before fail", []SlotRun{failure}, []SlotRun{running(31)}, Hold{Key: "a", Reason: HoldProbeRunning}},
+		{"running started before fail", []SlotRun{failure}, []SlotRun{running(31)}, Grow{Key: "a", Need: 1, Mode: Probe}},
 		{"failure older than memory", []SlotRun{closed(StatusFailed, FailServerNotAvailable, 361)}, nil, Grow{Key: "a", Need: 8, Mode: Full}},
 		{"failure at memory", []SlotRun{closed(StatusFailed, FailServerNotAvailable, 360)}, nil, Grow{Key: "a", Need: 1, Mode: Probe}},
 		{"probe at interval", []SlotRun{closed(StatusFailed, FailServerNotAvailable, 20)}, nil, Grow{Key: "a", Need: 1, Mode: Probe}},
@@ -132,6 +132,10 @@ func TestProbeProofTable(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := PoolFacts{Key: "a", Demand: 6, Closed: tt.closed, Open: tt.open}
+			if tt.name == "slot reuse overwrote failure with young run" {
+				f.State = MergeState(State{}, []SlotRun{failure}, clockTime(), p)
+				tt.want = Hold{Key: "a", Reason: HoldProbeRunning}
+			}
 			equal(t, Decide(f, p, clockTime()), tt.want)
 		})
 	}

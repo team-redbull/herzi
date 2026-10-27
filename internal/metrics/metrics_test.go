@@ -28,7 +28,8 @@ func TestCatalogueAndForget(t *testing.T) {
 		kind   string
 		labels []string
 	}{
-		"herzi_pool_blocked": {"GAUGE", []string{"pool", "reason"}}, "herzi_pool_failure_class": {"GAUGE", []string{"class", "pool"}}, "herzi_orders_total": {"COUNTER", []string{"mode", "pool", "result"}}, "herzi_machines_ordered_total": {"COUNTER", []string{"pool"}}, "herzi_would_remove_total": {"COUNTER", []string{"pool"}}, "herzi_warnings_total": {"COUNTER", []string{"kind"}}, "herzi_pollers": {"GAUGE", []string{"queue"}}, "herzi_config_valid": {"GAUGE", nil}, "herzi_reconcile_duration_seconds": {"HISTOGRAM", nil}, "herzi_sweep_duration_seconds": {"HISTOGRAM", nil},
+		"herzi_stuck_after_seconds": {"GAUGE", nil},
+		"herzi_pool_blocked":        {"GAUGE", []string{"pool", "reason"}}, "herzi_pool_failure_class": {"GAUGE", []string{"class", "pool"}}, "herzi_orders_total": {"COUNTER", []string{"mode", "pool", "result"}}, "herzi_machines_ordered_total": {"COUNTER", []string{"pool"}}, "herzi_would_remove_total": {"COUNTER", []string{"pool"}}, "herzi_warnings_total": {"COUNTER", []string{"kind"}}, "herzi_pollers": {"GAUGE", []string{"queue"}}, "herzi_config_valid": {"GAUGE", nil}, "herzi_reconcile_duration_seconds": {"HISTOGRAM", nil}, "herzi_sweep_duration_seconds": {"HISTOGRAM", nil},
 	}
 	for _, name := range []string{"demand", "assigned", "claimable", "settling", "stuck_agents", "open_runs", "target", "ceiling", "need", "probe_mode"} {
 		expected["herzi_pool_"+name] = struct {
@@ -144,5 +145,5 @@ func TestBoundedReasons(t *testing.T) {
 
 func TestReasonVocabulary(t *testing.T) {
 	reasons := []string{"pool is unmanaged", "pool is paused", "pool blocked until 2030-01-01T00:00:00Z", "InfraEnv is deleting", "InfraEnv is early-bound", "pool sweep failed: one", "read Agent bad failed: err", "poller check failed: err", "activity queue has no pollers", "workflow queue has no pollers", "segment queue has no pollers", "tenant/n: selector must be only the InfraEnv label", "tenant/n: no replicas (autoscaling?)", "pool \"p\": bad config", "arbitrary text", "arbitrary text"}
-	require.Equal(t, []string{"activity_pollers", "blocked_until", "config", "deleting", "early_bound", "other", "paused", "poller_error", "read_error", "replicas", "segment_pollers", "selector", "sweep_error", "unmanaged", "workflow_pollers"}, BlockReasons(reasons))
+	require.Equal(t, []string{"activity_pollers", "blocked_until", "config_invalid", "deleting", "early_bound", "other", "paused", "poller_error", "read_error", "replicas", "segment_pollers", "selector", "sweep_error", "unmanaged", "workflow_pollers"}, BlockReasons(reasons))
 }

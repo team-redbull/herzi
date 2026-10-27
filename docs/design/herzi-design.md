@@ -82,7 +82,7 @@ An empty pool, demand 0 → 50. Target 58. The controller never has more than 15
 
 ```
 10:00  need 58 → order 15
-10:20  10 runs done: supply 25 + 5 open → order 10 more (headroom 10)
+10:20  10 runs done: supply 10 Agents + 5 open → order 10 more (headroom 10)
 ...    about 4 waves; each pass orders only what is still missing
 ```
 
@@ -117,12 +117,12 @@ every two. 20 minutes because server-scan refreshes its state about every 15 min
 Same pool, 3 hours later someone racks servers and server-scan sees them.
 
 ```
-next probe (within 20 min): the run is still going 2 minutes later → proof a machine was found
+next probe (within 20 min): the run is still going 2 minutes later AND acquire_servers completed → proof a machine was found
 controller returns to FULL orders at once: need 6 → orders the rest
 ```
 
-A run that is still going 2 minutes after it started has passed the "no server" check (that fails in
-seconds). The controller does not wait for the probe's whole install to finish.
+A run older than 2 minutes proves recovery only after its acquire_servers activity completed.
+Retrying earlier activities does not prove acquisition; the controller need not wait for the whole install.
 
 ### 7. Only part of an order can be satisfied
 Order of 10, server-scan has 6 machines.
@@ -130,8 +130,9 @@ Order of 10, server-scan has 6 machines.
 ```
 10:00  6 runs get a machine and keep going, 4 fail at once ("no server")
        the 6 started BEFORE the failure closed → they are not proof of new hardware
-10:00  pool in probe mode, open runs > 0 → hold
-10:25  6 finished. Probe mode: next probe after 20 minutes
+10:00  pool in probe mode → wait for the scheduled probe
+10:20  send one probe despite the older open work (subject to total open-run cap)
+10:25  older runs finish; next probe follows probeNotBefore
 ```
 
 The controller does not send a second burst of 4 doomed runs, which a naive "a success happened"
@@ -398,29 +399,22 @@ func Decide(f PoolFacts, cfg Config, now time.Time) Intent {
         return Hold{f.Key, "inside band"}
     }
 
-    // ---- probe rule: derived from the sweep, no memory ----
+    // ---- probe rule: merge durable state with this sweep ----
     failing, lastFail := hardwareLooksMissing(f, p, now)
     if failing {
-        if running > 0                                   { return Hold{f.Key, "probe running"} }
-        if now.Sub(lastFail) < p.ProbeInterval           { return Hold{f.Key, "probe wait"} }   // 20 min
+        if exists open run started after lastFail         { return Hold{f.Key, "probe running"} }
+        if now.Before(f.State.ProbeNotBefore)           { return Hold{f.Key, "probe wait"} }   // 20 min
         return Grow{f.Key, 1, Probe}
     }
     return Grow{f.Key, need, Full}
 }
 
 func hardwareLooksMissing(f PoolFacts, p PoolConfig, now time.Time) (bool, time.Time) {
-    capFails := closed runs where Status in {Failed, TimedOut} and FailType in {ServerNotAvailableError, ServerReservedError}
-    lastFail := latest Closed among capFails
-    if none or now - lastFail > p.FailureMemory:   return false
-    // PROOF that hardware exists again = a run that STARTED AFTER the last capacity failure closed and
-    //   - Completed, or
-    //   - is still Running 'drawGrace' (2 min) after it started (a "no server" failure comes in seconds)
-    proof := exists run r in f.Open ∪ f.Closed with r.Started > lastFail and
-             (r.Status == Completed || (r.Status == Running && now - r.Started >= p.DrawGrace))
-    if proof:  return false
-    // other failure types: only when repeated and nothing worked since
-    ...otherFails := Failed runs with other types after the last Completed; if count >= 3 -> failing too
-    return true, lastFail
+    state := MergeState(f.State, f.Open + f.Closed, now, p)
+    // MergeState admits proof only for post-failure Completed runs or acquired mature Running runs.
+    lastFail := state.capFailAt if state.capFailAt > state.lastOKAt else zero
+    if len(state.otherFails) >= 3: lastFail = max(lastFail, latest other failure close time)
+    return lastFail != zero, lastFail
 }
 // Alert by failure type (metrics, not decisions):
 //   capacity class -> "pool X short by N, needs hardware"      other -> "pool X install failing: <type>, investigate"
@@ -447,21 +441,55 @@ Counting open runs, no memory needed:
   Describe(workflowId) with no run id returns the LATEST run and is strongly consistent, unlike a List.
   For slots closed Failed within failureMemory: read the failure type from the CLOSE EVENT
     (GetWorkflowHistory, close-event filter), cached by (workflowId, runId).
-  Throttle: a pool is swept at most once per 10 s; Recheck reuses a sweep younger than 30 s.
+  Cache: a pool is swept at most once per 10 s absent invalidation. Every POST attempt invalidates it.
+  Spending and Recheck require ObservedAt after the pool's previous attempt.
+  State retains failures across slot reuse; unknown history is a capacity-equivalent spending guard.
   Closed runs vanish after the Temporal namespace retention: retention must be well above
   max(probeInterval, failureMemory).
 
+Before a POST: persist blocked-until using an independent bounded 10-second context; failure means no POST.
 After a POST:
   202: the slots whose status is "started" are ordered. "failed" items are NOT assumed absent
        (a lost Temporal ack looks like a failure): the next sweep decides.
-       started < requested  => metric grow_short.
-  timeout / connection error / 5xx: ambiguous => write annotation  blocked-until = now + ambiguousWait (5 min)
+       started < requested  => metric grow_short. Clear blocked-until with a merge-patch null;
+       a failed clear is logged and the marker expires.
+  timeout / connection error / 5xx: ambiguous => extend the prewritten blocked-until from outcome time
        on the InfraEnv; do not retry the same request.
   422: our bug => log error, metric, same block.
 
 Pollers: DescribeTaskQueue (plain, not Enhanced) for the hub activity queue, the install workflow queue and the
 segment-lifecycle queue. Detection lags ~5 min after a worker dies.
 ```
+
+## Durable pool state and the pre-POST marker
+
+One annotation per InfraEnv, `herzi.redbull.io/state`, holds compact JSON of at most 1 KiB:
+`capFailAt` is the latest capacity/unknown failure close time; `otherFails` contains at most three
+most recent distinct `{runId, closedAt}` failures; `lastOKAt` records completion/recovery proof;
+`probeNotBefore` records the earliest next probe. Timestamps use RFC 3339. Unknown JSON keys are ignored.
+Missing, corrupt or oversized state degrades to the sweep alone, without blocking or panicking.
+
+`MergeState` is pure. It retains the latest timestamps, deduplicates failures by run ID, drops expired
+failure evidence, removes failures covered by success, and retains only the latest three other failures.
+A capacity/unknown failure without later proof or three distinct other failures since success enters probe
+mode. The initial wait follows the failure close time; each sent Probe extends `probeNotBefore` to its
+attempt time plus `probeInterval`. Older open work still subtracts from need and consumes headroom, but
+only post-failure open work suppresses a scheduled probe.
+
+A Running recovery run must start after the failure, reach `drawGrace`, AND have a completed
+`acquire_servers` activity. The name is verified in `shared/interfaces/server_lifecycle.py` and the
+install workflow. Run-pinned all-event history associates completion with its scheduled activity type;
+reads are bounded and lazy for capacity/unknown pools only. Positive acquisition is cached by workflow
+and run IDs. Read errors supply no acquisition proof. Completed proof must also start after the failure.
+
+The reconciler patches changed state through its own bounded context. Immediately before an additive
+POST it merge-patches `herzi.redbull.io/blocked-until = attempt time + ambiguousWait`; failure prevents
+spending. A Probe's new `probeNotBefore` is included in the SAME patch. All annotation patches contain
+only `metadata.annotations`, using `context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)`.
+A definite parsed 202 outcome clears only the marker with JSON null; a failed clear is logged and expires.
+Ambiguous/rejected outcomes keep the marker and extend it from outcome time through a fresh context.
+Every attempted POST invalidates the cached sweep. A later attempt requires `ObservedAt` strictly newer
+than the previous attempt, on both the initial decision and the uncached Kubernetes recheck.
 
 ## Config
 
@@ -487,7 +515,7 @@ defaults:
   minBand: 1
   maxOpenRunsPerPool: 15
   probeInterval: 20m                # server-scan refreshes about every 15 min
-  drawGrace: 2m                     # a run still going this long after it started has found a machine
+  drawGrace: 2m                     # minimum age for acquisition evidence to prove recovery
   failureMemory: 6h
   settlingMax: 60m                  # matches the install workflow's one-hour agent wait
   dryRunGrow: false                 # log "WOULD INSTALL" instead of ordering
@@ -514,7 +542,8 @@ func (c Config) ForPool(name string) PoolConfig {
 ```
 
 **Validation, after the merge, per pool.** `lowPct`/`highPct` >= 0 and `lowPct <= highPct`; `minFree` >= 0;
-`minBand` >= 1; `maxOpenRunsPerPool` between 1 and `maxSlots`; durations > 0; `drawGrace` < `probeInterval`.
+`minBand` >= 1; `maxOpenRunsPerPool` between 1 and `maxSlots`; durations > 0; `drawGrace` < `probeInterval`; `failureMemory` >= 2 × `probeInterval`;
+`settlingMax` >= `probeInterval`; hub `interval` <= each pool's `probeInterval`.
 A pool that fails validation is **blocked with the reason named** (other pools are unaffected). A bad
 ConfigMap update as a whole (unparseable, unknown keys) is rejected and the last good one kept.
 An unknown key under a pool is an error, so a typo such as `minfree` is caught instead of ignored.
@@ -563,8 +592,8 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 | 6 | 0 | 0 | 0 | 0 | capacity fail 3 min ago, no proof | 2 / 3 | Hold "probe wait" |
 | 6 | 0 | 0 | 0 | 0 | capacity fail 21 min ago | 2 / 3 | Grow 1 Probe |
 | 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 1 min ago | 2 / 3 | Hold "probe running" |
-| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 3 min ago | 2 / 3 | Grow 7 Full (proof) |
-| 10 | 4 | 0 | 0 | 6 | 4 capacity fails closed 10:00:20, the 6 runs started 10:00:00 | 2 / 3 | Hold "probe running" (no proof: started before the failure) |
+| 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 3 min ago, acquired | 2 / 3 | Grow 7 Full (proof) |
+| 10 | 4 | 0 | 0 | 6 | 4 capacity fails closed 10:00:20, the 6 runs started 10:00:00 | 2 / 3 | Hold "probe wait" until the scheduled probe (older open runs do not suppress it) |
 | 6 | 0 | 1 | 0 | 0 | capacity fail 30 min ago, run Completed 5 min ago, started after the fail | 2 / 3 | Grow 7 Full |
 | 6 | 0 | 0 | 0 | 0 | capacity fail 30 min ago, only a Completed run that started BEFORE it | 2 / 3 | Grow 1 Probe (not proof) |
 | 6 | 0 | 0 | 0 | 0 | 2 non-capacity fails, none since success | 2 / 3 | Grow 8 Full (needs 3 to probe) |
@@ -582,7 +611,7 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 
 | # | Flaw | Example | How it is handled |
 |---|---|---|---|
-| 1 | Duplicate orders (additive POST, visibility lag, lost reply) | order 12, reply lost, next pass orders 12 again → 34 for a target of 22 | The sweep Describes the fixed slot ids (consistent), subtracts open runs, blocks the pool 5 min after an unclear POST (stored on the InfraEnv). Rare residual race accepted |
+| 1 | Duplicate orders (additive POST, visibility lag, lost reply) | order 12, reply lost, next pass orders 12 again → 34 for a target of 22 | The sweep Describes all 100 fixed slots, subtracts open runs, and cannot be reused after an attempt. A pre-POST marker survives cancellation/restart; uncertain outcomes extend it from outcome time. Rare remote-request residual accepted |
 | 2 | No leader election | two replicas each order 12 | Lease election; one replica. No fencing: accepted |
 | 3 | Stale or partial reads | cached Agents empty → orders again | Errors block the pool; `Recheck` re-reads uncached and re-validates before ordering |
 | 4 | `count` > 20 gives 422 forever | need 58 → 422 every pass | Plan caps each request at 20, waves for big deficits |
@@ -598,17 +627,33 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 | 14 | Early-bound InfraEnv | hosts bound at once | Validate blocks it |
 | 15 | Hand installs invisible | operator installs 3 by name → 3 extra | Accepted; a per-pool pause switch |
 
+### Independent round 2 implementation
+
+| Finding | Resolution |
+|---|---|
+| F1 stale sweep spending | Observation timestamp checked after recheck; invalidate every attempted POST |
+| F2 lost ambiguity marker | Durable prewrite, detached bounded patch contexts, null clear, outcome-time extension |
+| F3 hidden slots | maxSlots must equal the route's 100 slots |
+| F4 reused-slot evidence loss | Bounded durable state, run-ID deduplication, persisted probe schedule |
+| F5 unreadable failure history | unknown class prevents Full spending |
+| F6 runtime mistaken for acquisition | Require completed acquire_servers activity or post-failure workflow completion |
+| F7 invalid timing combinations | Validate all four timing relationships for defaults and each merged pool |
+| F8 unrelated malformed objects | Identity-first pool-scoped errors; unattributable warnings |
+| F9 old hung work | Only post-failure open runs suppress a new probe; total cap still applies |
+| F10 whole-document pool rejection | Publish valid changes; config_invalid blocks the affected pool |
+| F11 ineffective stuckAfter | herzi_stuck_after_seconds is initialized from startup config (process constant); dead scaffolding removed |
+
 ## B. Flaws from the logic simulation
 
 | # | Flaw | Example | Fix |
 |---|---|---|---|
-| L1 | Wrong recovery evidence for probe mode | success from before the failure flips to Full → burst of doomed runs; slot reuse hides evidence; recovery waits a whole install | Proof must have started after the last capacity failure and (completed or still running after 2 min). A probe that found a machine returns the pool to Full immediately |
+| L1 | Wrong recovery evidence for probe mode | success from before the failure flips to Full → burst of doomed runs; slot reuse hides evidence; recovery waits a whole install | Proof must have started after the last capacity failure and (completed or still running after 2 min with a completed acquire_servers activity). Durable state survives slot reuse; a probe with acquisition proof returns the pool to Full |
 | L2 | Released machines vanish while rebooting | scale 20→4→12 orders 7 extra | `settling` = any free, unbound, non-deleting, not-yet-claimable Agent, measured from its last state change, up to 60 min, then an alert |
 | L3 | Orphan-bound Agents count as supply; shrink log overstates | 4 orphans hide a stall; "would remove 17" when 3 are free | `Surplus = min(total - target, claimable)`; no WouldRemove while any Agent settles; alert when assigned exceeds demand for hours. **Not fixed automatically** |
-| L4 | Failure classes | batch shortage shows as `ServerReservedError`; one dead host throttles the pool | `ServerNotAvailableError` and `ServerReservedError` are the capacity class and the only ones that probe; other failures probe only after 3 in a row |
+| L4 | Failure classes | batch shortage shows as `ServerReservedError`; one dead host throttles the pool | `ServerNotAvailableError` and `ServerReservedError` are capacity; unknown history also prevents Full. Three distinct other failed run IDs since last success enter probe mode |
 | L5 | Stale `agentMachineRef` Agent in no bucket | runaway ordering | Counted as settling, then an alert |
 | L6 | `Recheck` did not re-validate | worker dies just before the POST | Recheck re-runs Validate and Decide, orders at most the first amount |
-| L7 | The 5-minute block lived in memory | restart forgets it | Stored on the InfraEnv as an annotation |
+| L7 | The 5-minute block could miss a canceled outcome | restart forgets it | Prewritten on the InfraEnv with an independent 10-second patch context; clear uses annotation null |
 | L8 | Poller check missed the segment queue | runs hang at `resolving-vlan` | All three queues checked |
 | L9 | Zero-width band, truncating rounding | demand 6: target 8 = ceiling 8 | `high >= low + minBand`; integer half-up `(pct×d+50)/100` |
 | L10 | Double count while the Agent exists but the run is open | one pass of 1 too few | Accepted (seconds). Phase queries dropped: they removed almost nothing |
@@ -619,7 +664,7 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 |---|---|
 | The Kubebuilder command needs `--external-api-path` / `--external-api-domain`, and the three generated reconcilers must be merged | Scaffold section updated |
 | Lost lease = immediate exit, an in-flight POST may still land | Block stored on the InfraEnv; sweep on every start |
-| Event-driven reconciles are not rate limited | Sweep at most once per 10 s per pool; Recheck reuses a fresh sweep |
+| Event-driven reconciles are not rate limited | Cache for 10 s per pool; invalidate after every POST attempt; both decisions require observation after the previous attempt |
 | A NodePool does not carry the Agent namespace | One configured `agentNamespace`; the key is the InfraEnv name |
 | Agent cache can be large | Namespace-scoped cache plus a transform that drops `managedFields`; no label selector |
 | Describe does not return the failure | Close event read, cached by (id, runId) |
@@ -635,12 +680,12 @@ Columns: demand, assigned, claimable, settling, open, recent closed runs, then t
 |---|---|
 | Cold start of a new managed pool, demand 0 | seeds `minFree` machines (target 2) |
 | Pool not listed in config / paused / early-bound / deleting | read and reported, never orders |
-| Config changes | the ConfigMap watch re-queues all pools; a bad update is rejected |
+| Config changes | the file watcher re-queues pools; document/hub/default errors retain last good, merged pool errors block only that pool |
 | Inventory runs dry in a batch | the runs that got a machine continue; the failed ones start probe mode |
 | Hardware racked | next probe ≤ 20 min, then full orders at once. New hardware reaches server-scan on its vendor collection (~6 h) |
 | All candidates dead for a pool | the run fails after ~hours with `AgentNeverAppearedError`; after 3 such failures the pool probes and alerts "investigate" |
 | Machine installed but not yet approved | all Agents on this hub are auto-approved; settling covers the short gap |
-| Closed runs expired from retention | probe evidence is lost; the pool returns to Full orders for one pass, then re-learns from the next failure |
+| Closed runs expired from retention | durable annotation retains evidence until failureMemory; absent/corrupt state degrades to the visible sweep |
 | Many Agents flapping | per-pool sweep throttle; reconciles coalesce |
 | One slow pool | each reconcile has a deadline; pools reconcile in parallel |
 | Both leader and a stuck API request | old request may start runs after a sweep: accepted residual |

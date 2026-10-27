@@ -17,7 +17,7 @@ type Store struct {
 	hasData  bool
 }
 
-// NewStore installs the caller's initial config. The caller must validate it first.
+// NewStore installs a config produced by Load (including pool-local semantic errors).
 // It owns a copy of the initial map and pointers, so later caller edits are isolated.
 // Valid starts true, before any Update attempt has failed.
 func NewStore(initial Config) *Store {
@@ -36,7 +36,8 @@ func (s *Store) Snapshot() Config { return *s.current.Load() }
 // Valid reports whether the last Update succeeded (true initially).
 func (s *Store) Valid() bool { return s.valid.Load() }
 
-// Update publishes a fully validated config, or keeps the previous snapshot on error.
+// Update publishes a document-valid config, retaining pool-local semantic errors.
+// Document, hub and default errors keep the previous snapshot.
 // Concurrent updates are serialized, including the unchanged-bytes success path.
 func (s *Store) Update(data []byte) error {
 	s.updates.Lock()

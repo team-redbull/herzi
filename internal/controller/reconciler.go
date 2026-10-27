@@ -72,18 +72,37 @@ func New(o Options) (*Reconciler, error) {
 	for _, p := range []struct {
 		name  string
 		value any
-	}{{"Client", o.Client}, {"Reader", o.Reader}, {"Config", o.Config}, {"Sweeper", o.Sweeper}, {"Queues", o.Queues}, {"Installer", o.Installer}, {"Metrics", o.Metrics}} {
+	}{{"Client",
+		o.Client},
+		{"Reader",
+			o.Reader},
+		{"Config",
+			o.Config},
+		{"Sweeper",
+			o.Sweeper},
+		{"Queues",
+			o.Queues},
+		{"Installer",
+			o.Installer},
+		{"Metrics",
+			o.Metrics}} {
 		if isNil(p.value) {
-			return nil, fmt.Errorf("%s is required", p.name)
+			return nil, fmt.Errorf("port %s is required", p.name)
 		}
 	}
 	if err := o.Metrics.RegistrationError(); err != nil {
 		return nil, fmt.Errorf("metrics registration: %w", err)
 	}
+	o.Metrics.SetStuckAfter(o.Config.Snapshot().StuckAfter)
 	if o.Clock == nil {
 		o.Clock = time.Now
 	}
-	return &Reconciler{Options: o, cfg: o.Config, startup: o.Config.Snapshot().HubConfig, reasons: make(map[string]string), attempts: make(map[string]time.Time)}, nil
+	return &Reconciler{Options: o,
+			cfg:      o.Config,
+			startup:  o.Config.Snapshot().HubConfig,
+			reasons:  make(map[string]string),
+			attempts: make(map[string]time.Time)},
+		nil
 }
 
 // NeedLeaderElection documents the controller's default leader-only execution.
@@ -94,8 +113,6 @@ func (r *Reconciler) NeedLeaderElection() bool { return true }
 // +kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools,verbs=get;list;watch
 
 // Reconcile implements design Part 2: "one frozen config for the whole pass".
-//
-//nolint:gocyclo // one flat pass mirroring the design: gather, attribute, validate, decide, recheck, order
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, retErr error) {
 	started := time.Now()
 	defer func() {
@@ -141,7 +158,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	replaceInfraEnv(&raw, ie)
 	key := pipeline.PoolKey(req.Name)
 	sweepStarted := time.Now()
-	raw.Sweep = map[pipeline.PoolKey]pipeline.SweepResult{key: r.Sweeper.Sweep(ctx, key)}
+	sweep := r.sweep(ctx, key, pipeline.ParseState(ie.GetAnnotations()[kube.AnnotationState]), pc)
+	raw.Sweep = map[pipeline.PoolKey]pipeline.SweepResult{key: sweep}
 	r.Metrics.SweepDuration(time.Since(sweepStarted))
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -152,6 +170,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	}
 	r.Metrics.ObservePollers(raw.Pollers)
 	facts := pipeline.Attribute(raw, cfg)[key]
+	if facts.Managed {
+		facts.State, err = r.persistState(ctx, req.NamespacedName,
+			ie.GetAnnotations()[kube.AnnotationState], facts.State, now, pc)
+		if err != nil {
+			return result, err
+		}
+	}
 	r.warnings(ctx, facts.Warnings)
 	verdict := validate(facts, raw, cfg)
 	intent := pipeline.Decide(facts, pc, now)
@@ -174,77 +199,36 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	case pipeline.Hold:
 		log.FromContext(ctx).V(1).Info("Holding pool", "pool", req.Name, "reason", i.Reason)
 	case pipeline.WouldRemove:
-		log.FromContext(ctx).Info("Would remove machines", "pool", req.Name, "surplus", i.Surplus, "total", i.Total, "target", i.Target, "ceiling", i.Ceiling)
+		log.FromContext(ctx).Info("Would remove machines",
+			"pool",
+			req.Name,
+			"surplus",
+			i.Surplus,
+			"total",
+			i.Total,
+			"target",
+			i.Target,
+			"ceiling",
+			i.Ceiling)
 		r.Metrics.WouldRemove(req.Name)
 	case pipeline.Grow:
-		fresh, err := r.gather(ctx, r.Reader, cfg, req.Name, now, true)
-		if apierrors.IsNotFound(err) {
-			exists = false
-			r.forget(req.Name)
-			return result, nil
-		}
-		if err != nil {
-			return result, err
-		}
-		fresh.Sweep, fresh.Pollers = raw.Sweep, raw.Pollers
-		f := pipeline.Attribute(fresh, cfg)[key]
-		v := validate(f, fresh, cfg)
-		second := pipeline.Decide(f, pc, now)
-		r.observe(f, v, second, pc, now)
-		g, ok := second.(pipeline.Grow)
-		if v.Blocked {
-			wakeUntil = f.BlockedUntil
-			r.blocked(ctx, req.Name, v.Reasons)
-			return result, nil
-		}
-		if !ok {
-			return result, nil
-		}
-		g.Need = min(g.Need, i.Need)
-		if i.Mode == pipeline.Probe {
-			g.Mode = pipeline.Probe
-		}
-		if g.Mode == pipeline.Probe {
-			g.Need = min(g.Need, 1)
-		}
-		for _, request := range pipeline.Plan(g, pc, f) {
-			if err := ctx.Err(); err != nil {
-				return result, err
-			}
-			if pc.DryRunGrow {
-				log.FromContext(ctx).Info("Would install", "pool", req.Name, "request", request, "count", request.Count)
-				r.Metrics.Order(req.Name, g.Mode, "dry_run", 0)
-				continue
-			}
-			// Temporal sweeps are cached for 10s in the production port. A
-			// watch event must not spend against the same pre-order sweep.
-			// Monotonic elapsed time only schedules the throttle; pipeline
-			// decisions and annotation timestamps retain the frozen now.
-			if wait := r.reserveAttempt(req.Name, now.Add(time.Since(started))); wait > 0 {
-				result.RequeueAfter = min(cfg.Interval, wait)
-				return result, nil
-			}
-			res, err := r.Installer.Install(ctx, request)
-			if errors.Is(err, pipeline.ErrAmbiguous) || errors.Is(err, pipeline.ErrRejected) {
-				wakeUntil = blockedUntil(now, cfg.AmbiguousWait)
-			}
-			if err := r.recordOutcome(ctx, req.NamespacedName, g.Mode, request, res, err, cfg, now); err != nil {
-				return result, err
-			}
-		}
+		result, wakeUntil, exists, retErr = r.grow(ctx, req, cfg, now, started, raw, i)
+		return result, retErr
 	}
 	return result, nil
 }
 
 func validate(f pipeline.PoolFacts, raw pipeline.RawSnapshot, cfg config.Config) pipeline.Verdict {
-	v := pipeline.Validate(f, raw, cfg.ForPool(string(f.Key)))
 	if err := cfg.PoolErrors()[string(f.Key)]; err != nil {
-		v.Blocked = true
-		v.Reasons = append(v.Reasons, err.Error())
+		f.Problems = append(f.Problems, pipeline.Problem{Pool: f.Key, Msg: err.Error()})
 	}
-	return v
+	return pipeline.Validate(f, raw, cfg.ForPool(string(f.Key)))
 }
-func (r *Reconciler) observe(f pipeline.PoolFacts, v pipeline.Verdict, i pipeline.Intent, p config.PoolConfig, now time.Time) {
+func (r *Reconciler) observe(f pipeline.PoolFacts,
+	v pipeline.Verdict,
+	i pipeline.Intent,
+	p config.PoolConfig,
+	now time.Time) {
 	low := max(p.MinFree, (p.LowPct*f.Demand+50)/100)
 	high := max(low+p.MinBand, (p.HighPct*f.Demand+50)/100)
 	target, ceiling := f.Demand+low, f.Demand+high
@@ -318,7 +302,14 @@ func (r *Reconciler) cachedPollers(ctx context.Context, now time.Time) pipeline.
 	return status
 }
 
-func (r *Reconciler) recordOutcome(ctx context.Context, key types.NamespacedName, mode pipeline.Mode, request pipeline.InstallRequest, res pipeline.InstallResult, err error, cfg config.Config, now time.Time) error {
+func (r *Reconciler) recordOutcome(ctx context.Context,
+	key types.NamespacedName,
+	mode pipeline.Mode,
+	request pipeline.InstallRequest,
+	res pipeline.InstallResult,
+	err error,
+	cfg config.Config,
+	now time.Time) error {
 	result := "started"
 	switch {
 	case errors.Is(err, pipeline.ErrAmbiguous):
@@ -332,16 +323,18 @@ func (r *Reconciler) recordOutcome(ctx context.Context, key types.NamespacedName
 		result = "short"
 	}
 	r.Metrics.Order(key.Name, mode, result, len(res.Started))
-	if result == "ambiguous" || result == "rejected" {
-		body, _ := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{kube.AnnotationBlockedUntil: blockedUntil(now, cfg.AmbiguousWait).Format(time.RFC3339)}}})
-		ie := kube.NewUnstructured(kube.InfraEnvGVK)
-		ie.SetNamespace(key.Namespace)
-		ie.SetName(key.Name)
-		if patchErr := r.Client.Patch(ctx, ie, client.RawPatch(types.MergePatchType, body)); patchErr != nil {
-			log.FromContext(ctx).Error(errors.New("annotation patch was rejected by the API server"), "Failed to block InfraEnv", "pool", key.Name)
-			return fmt.Errorf("patch InfraEnv block annotation: %w", patchErr)
+	annotations := map[string]any{kube.AnnotationBlockedUntil: nil}
+	if err != nil {
+		annotations[kube.AnnotationBlockedUntil] = blockedUntil(now, cfg.AmbiguousWait).Format(time.RFC3339)
+	}
+	if patchErr := r.patchAnnotations(ctx, key, annotations); patchErr != nil {
+		log.FromContext(ctx).Error(errors.New("annotation patch was rejected by the API server"),
+			"Failed to update InfraEnv marker", "pool", key.Name)
+		if err != nil {
+			return patchErr
 		}
 	}
+
 	return nil
 }
 
@@ -370,20 +363,158 @@ func blockedUntil(now time.Time, wait time.Duration) time.Time {
 // credentials or arbitrary HTTP response bodies.
 type reconcileError struct{ cause error }
 
-func (e *reconcileError) Error() string { return "Reconcile failed" }
+func (e *reconcileError) Error() string { return "reconcile failed" }
 func (e *reconcileError) Unwrap() error { return e.cause }
 
-// sweepWindow matches the production sweeper CacheTTL (design Part 2, Growth
-// protocol). Main sets that TTL explicitly. This disposable throttle is not a
-// replacement for the persistent block annotation or the uncached recheck.
+// sweepWindow schedules a retry for ports that return stale observations.
+// Eligibility itself depends solely on ObservedAt, never on elapsed wall time.
 const sweepWindow = 10 * time.Second
 
-func (r *Reconciler) reserveAttempt(pool string, now time.Time) time.Duration {
+func (r *Reconciler) freshSweep(pool string, observed time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if last, ok := r.attempts[pool]; ok && now.Sub(last) < sweepWindow {
-		return sweepWindow - now.Sub(last)
+	last, ok := r.attempts[pool]
+	return !ok || observed.After(last)
+}
+func (r *Reconciler) markAttempt(pool string, at time.Time) {
+	r.mu.Lock()
+	r.attempts[pool] = at
+	r.mu.Unlock()
+}
+
+func (r *Reconciler) patchAnnotations(ctx context.Context, key types.NamespacedName, a map[string]any) error {
+	patchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": a}})
+	if err != nil {
+		return fmt.Errorf("encode annotation patch: %w", err)
 	}
-	r.attempts[pool] = now
-	return 0
+	ie := kube.NewUnstructured(kube.InfraEnvGVK)
+	ie.SetNamespace(key.Namespace)
+	ie.SetName(key.Name)
+	if err := r.Client.Patch(patchCtx, ie, client.RawPatch(types.MergePatchType, body)); err != nil {
+		return fmt.Errorf("patch InfraEnv annotations: %w", err)
+	}
+	return nil
+}
+func (r *Reconciler) persistState(ctx context.Context, key types.NamespacedName,
+	previous string, state pipeline.State, now time.Time, p config.PoolConfig) (pipeline.State, error) {
+	if reflect.DeepEqual(pipeline.ParseState(previous), state) {
+		return state, nil
+	}
+	// Never overwrite newer durable evidence with an informer-cache snapshot.
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	ie := kube.NewUnstructured(kube.InfraEnvGVK)
+	if err := r.Reader.Get(readCtx, key, ie); err != nil {
+		return state, fmt.Errorf("read durable pool state: %w", err)
+	}
+	current := pipeline.ParseState(ie.GetAnnotations()[kube.AnnotationState])
+	state = unionState(state, current, now, p)
+	if reflect.DeepEqual(current, state) {
+		return state, nil
+	}
+	err := r.patchAnnotations(ctx, key, map[string]any{kube.AnnotationState: pipeline.EncodeState(state)})
+	return state, err
+}
+
+func unionState(a, b pipeline.State, now time.Time, p config.PoolConfig) pipeline.State {
+	if b.CapFailAt.After(a.CapFailAt) {
+		a.CapFailAt = b.CapFailAt
+	}
+	if b.LastOKAt.After(a.LastOKAt) {
+		a.LastOKAt = b.LastOKAt
+	}
+	if b.ProbeNotBefore.After(a.ProbeNotBefore) {
+		a.ProbeNotBefore = b.ProbeNotBefore
+	}
+	a.OtherFails = append(append([]pipeline.Failure(nil), a.OtherFails...), b.OtherFails...)
+	return pipeline.MergeState(a, nil, now, p)
+}
+
+func (r *Reconciler) sweep(ctx context.Context, key pipeline.PoolKey, state pipeline.State,
+	p config.PoolConfig) pipeline.SweepResult {
+	if sweeper, ok := r.Sweeper.(pipeline.StatefulSweeper); ok {
+		return sweeper.SweepWithState(ctx, key, state, p)
+	}
+	return r.Sweeper.Sweep(ctx, key)
+}
+
+func (r *Reconciler) grow(ctx context.Context, req ctrl.Request, cfg config.Config,
+	now, started time.Time, raw pipeline.RawSnapshot, i pipeline.Grow) (ctrl.Result, time.Time, bool, error) {
+	result := ctrl.Result{RequeueAfter: cfg.Interval}
+	var wakeUntil time.Time
+	exists := true
+	key := pipeline.PoolKey(req.Name)
+	pc := cfg.ForPool(req.Name)
+	fresh, err := r.gather(ctx, r.Reader, cfg, req.Name, now, true)
+	if apierrors.IsNotFound(err) {
+		exists = false
+		r.forget(req.Name)
+		return result, wakeUntil, exists, nil
+	}
+	if err != nil {
+		return result, wakeUntil, exists, err
+	}
+	fresh.Sweep, fresh.Pollers = raw.Sweep, raw.Pollers
+	f := pipeline.Attribute(fresh, cfg)[key]
+	v := validate(f, fresh, cfg)
+	second := pipeline.Decide(f, pc, now)
+	r.observe(f, v, second, pc, now)
+	g, ok := second.(pipeline.Grow)
+	if v.Blocked {
+		wakeUntil = f.BlockedUntil
+		r.blocked(ctx, req.Name, v.Reasons)
+		return result, wakeUntil, exists, nil
+	}
+	if !ok {
+		return result, wakeUntil, exists, nil
+	}
+	g.Need = min(g.Need, i.Need)
+	if i.Mode == pipeline.Probe {
+		g.Mode = pipeline.Probe
+	}
+	if g.Mode == pipeline.Probe {
+		g.Need = min(g.Need, 1)
+	}
+	for _, request := range pipeline.Plan(g, pc, f) {
+		if err := ctx.Err(); err != nil {
+			return result, wakeUntil, exists, err
+		}
+		if pc.DryRunGrow {
+			log.FromContext(ctx).Info("Would install", "pool", req.Name, "request", request, "count", request.Count)
+			r.Metrics.Order(req.Name, g.Mode, "dry_run", 0)
+			continue
+		}
+		if !r.freshSweep(req.Name, raw.Sweep[key].ObservedAt) {
+			result.RequeueAfter = min(cfg.Interval, sweepWindow)
+			return result, wakeUntil, exists, nil
+		}
+		attemptAt := now.Add(time.Since(started))
+		annotations := map[string]any{
+			kube.AnnotationBlockedUntil: blockedUntil(attemptAt, cfg.AmbiguousWait).Format(time.RFC3339),
+		}
+		if g.Mode == pipeline.Probe {
+			f.State.ProbeNotBefore = attemptAt.Add(pc.ProbeInterval)
+			annotations[kube.AnnotationState] = pipeline.EncodeState(f.State)
+		}
+		if err := r.patchAnnotations(ctx, req.NamespacedName, annotations); err != nil {
+			return result, wakeUntil, exists, err
+		}
+		r.markAttempt(req.Name, attemptAt)
+		res, installErr := r.Installer.Install(ctx, request)
+		if invalidator, ok := r.Sweeper.(pipeline.SweepInvalidator); ok {
+			invalidator.Invalidate(key)
+		}
+		outcomeAt := now.Add(time.Since(started))
+		if installErr != nil {
+			wakeUntil = blockedUntil(outcomeAt, cfg.AmbiguousWait)
+		}
+		if err := r.recordOutcome(ctx, req.NamespacedName, g.Mode, request, res, installErr, cfg,
+			outcomeAt); err != nil {
+			return result, wakeUntil, exists, err
+		}
+
+	}
+	return result, wakeUntil, exists, nil
 }

@@ -15,9 +15,14 @@ import (
 )
 
 // gather implements design Part 2's cached snapshot and uncached "Recheck".
-// Malformed objects become hub ReadErrors: silently dropping inventory could
-// create false demand or supply. The pass still reports gauges and blocks safely.
-func (r *Reconciler) gather(ctx context.Context, reader client.Reader, cfg config.Config, pool string, now time.Time, recheck bool) (pipeline.RawSnapshot, error) {
+// Malformed objects block only their identifiable pool; unattributable objects warn.
+func (r *Reconciler) gather(ctx context.Context,
+	reader client.Reader,
+	cfg config.Config,
+	pool string,
+	now time.Time,
+	recheck bool) (pipeline.RawSnapshot,
+	error) {
 	raw := pipeline.RawSnapshot{At: now}
 	if recheck {
 		ie := kube.NewUnstructured(kube.InfraEnvGVK)
@@ -40,9 +45,10 @@ func (r *Reconciler) gather(ctx context.Context, reader client.Reader, cfg confi
 	}
 	for i := range list.Items {
 		u := &list.Items[i]
+		identity := parseError(u, nil)
 		v, err := kube.ParseNodePool(u, now)
 		if err != nil {
-			raw.ReadErrs = append(raw.ReadErrs, parseError(u, err))
+			appendParseError(&raw, identity, err)
 			continue
 		}
 		raw.NodePools = append(raw.NodePools, v)
@@ -57,16 +63,21 @@ func (r *Reconciler) gather(ctx context.Context, reader client.Reader, cfg confi
 	}
 	for i := range list.Items {
 		u := &list.Items[i]
+		identity := parseError(u, nil)
 		v, err := kube.ParseAgent(u)
 		if err != nil {
-			raw.ReadErrs = append(raw.ReadErrs, parseError(u, err))
+			appendParseError(&raw, identity, err)
 			continue
 		}
 		raw.Agents = append(raw.Agents, v)
 	}
 	return raw, nil
 }
-func listObjects(ctx context.Context, reader client.Reader, gvk schema.GroupVersionKind, opts ...client.ListOption) (*unstructured.UnstructuredList, error) {
+func listObjects(ctx context.Context,
+	reader client.Reader,
+	gvk schema.GroupVersionKind,
+	opts ...client.ListOption) (*unstructured.UnstructuredList,
+	error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
 	if err := reader.List(ctx, list, opts...); err != nil {
@@ -75,12 +86,32 @@ func listObjects(ctx context.Context, reader client.Reader, gvk schema.GroupVers
 	return list, nil
 }
 func parseError(u *unstructured.Unstructured, err error) pipeline.ReadError {
-	return pipeline.ReadError{What: u.GetKind() + " " + u.GetNamespace() + "/" + u.GetName(), Err: err}
+	pool := ""
+	switch u.GetKind() {
+	case "Agent":
+		pool = u.GetLabels()[kube.LabelInfraEnv]
+	case "InfraEnv":
+		pool = u.GetName()
+	case "NodePool":
+		pool, _, _ = unstructured.NestedString(u.Object, "spec", "platform", "agent",
+			"agentLabelSelector", "matchLabels", kube.LabelInfraEnv)
+	}
+	return pipeline.ReadError{Pool: pipeline.PoolKey(pool),
+		What: u.GetKind() + " " + u.GetNamespace() + "/" + u.GetName(), Err: err}
+}
+func appendParseError(raw *pipeline.RawSnapshot, e pipeline.ReadError, err error) {
+	e.Err = err
+	if e.Pool == "" {
+		raw.Warnings = append(raw.Warnings, pipeline.Warning{Object: e.What, Msg: "malformed unattributed object"})
+	} else {
+		raw.ReadErrs = append(raw.ReadErrs, e)
+	}
 }
 func replaceInfraEnv(raw *pipeline.RawSnapshot, u *unstructured.Unstructured) {
+	identity := parseError(u, nil)
 	v, err := kube.ParseInfraEnv(u)
 	if err != nil {
-		raw.ReadErrs = append(raw.ReadErrs, parseError(u, err))
+		appendParseError(raw, identity, err)
 		// Keep the identity so this pool still reports metrics while blocked.
 		v = kube.InfraEnv{Name: u.GetName(), Namespace: u.GetNamespace()}
 	}

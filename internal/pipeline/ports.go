@@ -1,6 +1,10 @@
 package pipeline
 
-import "context"
+import (
+	"context"
+
+	"github.com/team-redbull/herzi/internal/config"
+)
 
 // Ports are the I/O the controller needs. They are defined here (next to the types they return) and
 // implemented by internal/temporalx, internal/installer and internal/controller. Tests of the
@@ -30,4 +34,12 @@ type Installer interface {
 	// Install returns ErrAmbiguous (wrapped) for a timeout, connection error or 5xx: the caller cannot
 	// know whether anything started and must block the pool. Any other error is a definite failure.
 	Install(ctx context.Context, req InstallRequest) (InstallResult, error)
+}
+
+// SweepInvalidator discards observations made before an order attempt.
+type SweepInvalidator interface{ Invalidate(pool PoolKey) }
+
+// StatefulSweeper lazily checks acquisition only when durable failure evidence needs proof.
+type StatefulSweeper interface {
+	SweepWithState(context.Context, PoolKey, State, config.PoolConfig) SweepResult
 }

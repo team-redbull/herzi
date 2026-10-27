@@ -130,7 +130,14 @@ func TestLoadDurationFields(t *testing.T) {
 				} else if path.prefix != "" {
 					suffix = path.prefix + ":\n    " + suffix
 				}
-				_, err := config.Load([]byte(minimal + suffix))
+				c, err := config.Load([]byte(minimal + suffix))
+				if strings.HasPrefix(path.prefix, "pools") && value == "0s" {
+					if err != nil {
+						t.Fatal(err)
+					}
+					requireError(t, c.PoolErrors()["test"], path.field)
+					return
+				}
 				requireError(t, err, path.field)
 				if strings.HasPrefix(path.prefix, "pools") {
 					requireError(t, err, "test")
@@ -222,8 +229,8 @@ func TestValidatePoolRules(t *testing.T) {
 		{"MinFree", -1, 0}, {"MinBand", 0, 1}, {"MaxOpenRunsPerPool", 0, 1},
 		{"MaxOpenRunsPerPool", 101, 100},
 		{"ProbeInterval", time.Duration(0), time.Minute * 3},
-		{"DrawGrace", time.Duration(0), time.Second}, {"FailureMemory", time.Duration(0), time.Second},
-		{"SettlingMax", time.Duration(0), time.Second}, {"DrawGrace", 20 * time.Minute, 19 * time.Minute},
+		{"DrawGrace", time.Duration(0), time.Second}, {"FailureMemory", time.Duration(0), time.Hour},
+		{"SettlingMax", time.Duration(0), time.Hour}, {"DrawGrace", 20 * time.Minute, 19 * time.Minute},
 	}
 	for _, tt := range tests {
 		for _, where := range []string{"defaults", "pool"} {
@@ -265,14 +272,12 @@ func TestValidatePoolRules(t *testing.T) {
 			})
 		}
 	}
-	// The configured slot limit can be lower than the route's maximum.
+	// The configured slot limit must equal the route's fixed slot range.
 	c := validConfig(t)
 	c.MaxSlots = 14
 	requireError(t, c.Validate(), "maxOpenRunsPerPool")
 	c.Defaults.MaxOpenRunsPerPool = 14
-	if err := c.Validate(); err != nil {
-		t.Fatal(err)
-	}
+	requireError(t, c.Validate(), "maxSlots", "exactly 100")
 	// The route limit still applies when the hub config itself is invalid.
 	c.MaxSlots = 200
 	c.Defaults.MaxOpenRunsPerPool = 101
@@ -308,9 +313,7 @@ func TestValidateHubRules(t *testing.T) {
 	c := validConfig(t)
 	c.MaxSlots = 1
 	c.Defaults.MaxOpenRunsPerPool = 1
-	if err := c.Validate(); err != nil {
-		t.Fatal(err)
-	}
+	requireError(t, c.Validate(), "maxSlots")
 }
 
 func TestValidationCollectsAllProblems(t *testing.T) {
@@ -322,7 +325,7 @@ func TestValidationCollectsAllProblems(t *testing.T) {
 	err := c.Validate()
 	requireError(t, err, "hubName", "interval", "defaults", "minFree", `pool "z"`, "lowPct", `pool "a"`, "minBand")
 	joined, ok := err.(interface{ Unwrap() []error })
-	if !ok || len(joined.Unwrap()) < 5 {
+	if !ok || len(joined.Unwrap()) < 3 {
 		t.Fatal("must join every problem")
 	}
 	if len(c.PoolErrors()) != 2 {
@@ -336,7 +339,7 @@ installURL: http://example.com/install
 interval: 3m
 reconcileTimeout: 90s
 agentNamespace: custom
-maxSlots: 50
+maxSlots: 100
 ambiguousWait: 10m
 stuckAfter: 3h
 temporalAddress: localhost:7233
@@ -349,7 +352,7 @@ segmentQueue: s
 		t.Fatal(err)
 	}
 	want := config.HubConfig{HubName: "ocp4-custom", InstallURL: "http://example.com/install", Interval: 3 * time.Minute,
-		ReconcileTimeout: 90 * time.Second, AgentNamespace: "custom", MaxSlots: 50, AmbiguousWait: 10 * time.Minute, StuckAfter: 3 * time.Hour,
+		ReconcileTimeout: 90 * time.Second, AgentNamespace: "custom", MaxSlots: 100, AmbiguousWait: 10 * time.Minute, StuckAfter: 3 * time.Hour,
 		TemporalAddress: "localhost:7233", TemporalNamespace: "custom", ActivityQueue: "a", WorkflowQueue: "w", SegmentQueue: "s"}
 	if diff := cmp.Diff(want, c.HubConfig); diff != "" {
 		t.Fatal(diff)

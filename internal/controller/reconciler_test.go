@@ -26,6 +26,7 @@ import (
 
 type sweepFake struct {
 	result pipeline.SweepResult
+	now    func() time.Time
 	calls  int
 }
 
@@ -34,7 +35,11 @@ func (s *sweepFake) Sweep(ctx context.Context, _ pipeline.PoolKey) pipeline.Swee
 	if ctx.Err() != nil {
 		return pipeline.SweepResult{Err: ctx.Err()}
 	}
-	return s.result
+	result := s.result
+	if result.ObservedAt.IsZero() && s.now != nil {
+		result.ObservedAt = s.now()
+	}
+	return result
 }
 
 type queuesFake struct {
@@ -112,6 +117,7 @@ type fixture struct {
 func setup(t *testing.T, cfg config.Config, objects ...client.Object) *fixture {
 	t.Helper()
 	f := &fixture{c: fake.NewClientBuilder().WithObjects(objects...).Build(), sweep: &sweepFake{}, queues: &queuesFake{result: pipeline.PollerStatus{Activity: 1, Workflow: 2, Segment: 3}}, install: &installFake{}, reg: prometheus.NewRegistry(), now: time.Date(2026, 10, 26, 10, 0, 0, 0, time.UTC)}
+	f.sweep.now = func() time.Time { return f.now }
 	var err error
 	f.r, err = New(Options{Client: f.c, Reader: f.c, Config: config.NewStore(cfg), Sweeper: f.sweep, Queues: f.queues, Installer: f.install, Metrics: metrics.New(f.reg), Clock: func() time.Time { return f.now }})
 	require.NoError(t, err)
@@ -119,7 +125,7 @@ func setup(t *testing.T, cfg config.Config, objects ...client.Object) *fixture {
 }
 func (f *fixture) reconcile(t *testing.T, pool string) {
 	t.Helper()
-	result, err := f.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "inventory", Name: pool}})
+	result, err := f.r.Reconcile(context.Background(), ctrl.Request{Namespace: "inventory", Name: pool})
 	require.NoError(t, err)
 	require.Positive(t, result.RequeueAfter)
 	require.LessOrEqual(t, result.RequeueAfter, 2*time.Minute)
@@ -296,7 +302,7 @@ func TestOutcomes(t *testing.T) {
 				p.err = errors.New("patch offline")
 			}
 			if kind == "patch failure" || kind == "unexpected error" {
-				_, err := f.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Namespace: "inventory", Name: "p"}})
+				_, err := f.r.Reconcile(context.Background(), ctrl.Request{Namespace: "inventory", Name: "p"})
 				require.Error(t, err)
 				return
 			}
@@ -305,7 +311,7 @@ func TestOutcomes(t *testing.T) {
 				var body map[string]any
 				require.NoError(t, json.Unmarshal(p.body, &body))
 				require.Equal(t, types.MergePatchType, p.patchType)
-				require.Equal(t, map[string]any{"metadata": map[string]any{"annotations": map[string]any{kube.AnnotationBlockedUntil: f.now.Add(5 * time.Minute).Format(time.RFC3339)}}}, body)
+				require.Equal(t, map[string]any{"metadata": map[string]any{"annotations": map[string]any{kube.AnnotationBlockedUntil: f.now.Add(5*time.Minute + time.Second).Format(time.RFC3339)}}}, body)
 				f.reconcile(t, "p")
 				require.Len(t, f.install.requests, 1)
 			}
@@ -451,7 +457,7 @@ func TestNewAndNamespace(t *testing.T) {
 		_, err := New(o)
 		require.Error(t, err)
 	}
-	_, err = f.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Namespace: "elsewhere", Name: "p"}})
+	_, err = f.r.Reconcile(context.Background(), ctrl.Request{Namespace: "elsewhere", Name: "p"})
 	require.NoError(t, err)
 	require.Zero(t, f.sweep.calls)
 }
@@ -474,7 +480,7 @@ func TestBlockSurvivesRestartAndExpires(t *testing.T) {
 	f.install.err = nil
 	f.reconcile(t, "p")
 	require.Len(t, f.install.requests, 1)
-	f.now = f.now.Add(5 * time.Minute)
+	f.now = f.now.Add(5*time.Minute + time.Second)
 	f.reconcile(t, "p")
 	require.Len(t, f.install.requests, 2)
 }

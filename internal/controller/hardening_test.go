@@ -170,7 +170,7 @@ func (c deadlineClient) Patch(ctx context.Context, obj client.Object, p client.P
 	return c.Client.Patch(ctx, obj, p, opts...)
 }
 func TestExternalDeadlinesAndCancellation(t *testing.T) {
-	for _, stage := range []string{"get", "AgentList", "fresh-get", "fresh-AgentList", "sweep", "pollers", "install", "patch"} {
+	for _, stage := range []string{"get", "AgentList", "fresh-get", "fresh-AgentList", "sweep", "pollers", "install"} {
 		t.Run(stage, func(t *testing.T) {
 			cfg := testConfig()
 			cfg.ReconcileTimeout = 20 * time.Millisecond
@@ -182,6 +182,10 @@ func TestExternalDeadlinesAndCancellation(t *testing.T) {
 				require.True(t, ok)
 				if deadline.IsZero() {
 					deadline = d
+				}
+				if call == "patch" {
+					require.InDelta(t, 10, time.Until(d).Seconds(), .1)
+					return nil
 				}
 				require.Equal(t, deadline, d)
 				calls = append(calls, call)
@@ -207,7 +211,11 @@ func TestExternalDeadlinesAndCancellation(t *testing.T) {
 			})
 			started := time.Now()
 			_, err := f.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(infra("p"))})
-			require.ErrorIs(t, err, context.DeadlineExceeded)
+			if stage == "install" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			}
 			require.Less(t, time.Since(started), time.Second)
 			require.Contains(t, calls, stage)
 		})

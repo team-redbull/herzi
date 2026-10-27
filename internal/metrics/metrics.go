@@ -28,12 +28,14 @@ type Metrics struct {
 	pollers           *prometheus.GaugeVec
 	reconcile, sweep  prometheus.Histogram
 	valid             prometheus.Gauge
+	stuckAfter        prometheus.Gauge
 }
 
 // New registers every metric in the catalogue. The caller supplies a fresh or
 // application-owned Registerer; duplicate registrations reuse the same collector.
 // labelPool is the one label every per-pool series carries.
 const labelPool = "pool"
+const classOther = "other"
 
 func New(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{gauges: make(map[string]*prometheus.GaugeVec)}
@@ -52,22 +54,58 @@ func New(reg prometheus.Registerer) *Metrics {
 		}
 		return c
 	}
-	for _, name := range []string{"demand", "assigned", "claimable", "settling", "stuck_agents", "open_runs", "target", "ceiling", "need", "probe_mode"} {
-		m.gauges[name] = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pool_" + name, Help: "Pool " + name}, []string{labelPool})).(*prometheus.GaugeVec)
+	for _, name := range []string{"demand",
+		"assigned",
+		"claimable",
+		"settling",
+		"stuck_agents",
+		"open_runs",
+		"target",
+		"ceiling",
+		"need",
+		"probe_mode"} {
+		m.gauges[name] = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pool_" + name,
+			Help: "Pool " + name},
+			[]string{labelPool})).(*prometheus.GaugeVec)
 	}
 	for _, name := range []string{"oldest_open_run_seconds", "last_successful_reconcile_timestamp_seconds"} {
-		m.gauges[name] = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_" + name, Help: name}, []string{labelPool})).(*prometheus.GaugeVec)
+		m.gauges[name] = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_" + name,
+			Help: name},
+			[]string{labelPool})).(*prometheus.GaugeVec)
 	}
-	m.blocked = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pool_blocked", Help: "Pool blocked this pass"}, []string{labelPool, "reason"})).(*prometheus.GaugeVec)
-	m.failure = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pool_failure_class", Help: "Latest failure class"}, []string{labelPool, "class"})).(*prometheus.GaugeVec)
-	m.orders = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_orders_total", Help: "Install requests"}, []string{labelPool, "mode", "result"})).(*prometheus.CounterVec)
-	m.machines = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_machines_ordered_total", Help: "Machines started"}, []string{labelPool})).(*prometheus.CounterVec)
-	m.removes = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_would_remove_total", Help: "Shrink log lines"}, []string{labelPool})).(*prometheus.CounterVec)
-	m.warnings = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_warnings_total", Help: "Hub findings"}, []string{"kind"})).(*prometheus.CounterVec)
-	m.pollers = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pollers", Help: "Queue pollers"}, []string{"queue"})).(*prometheus.GaugeVec)
-	m.reconcile = register(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "herzi_reconcile_duration_seconds", Help: "Reconcile duration"})).(prometheus.Histogram)
-	m.sweep = register(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "herzi_sweep_duration_seconds", Help: "Pool sweep duration"})).(prometheus.Histogram)
-	m.valid = register(prometheus.NewGauge(prometheus.GaugeOpts{Name: "herzi_config_valid", Help: "Last configuration accepted"})).(prometheus.Gauge)
+	m.blocked = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pool_blocked",
+		Help: "Pool blocked this pass"},
+		[]string{labelPool,
+			"reason"})).(*prometheus.GaugeVec)
+	m.failure = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pool_failure_class",
+		Help: "Latest failure class"},
+		[]string{labelPool,
+			"class"})).(*prometheus.GaugeVec)
+	m.orders = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_orders_total",
+		Help: "Install requests"},
+		[]string{labelPool,
+			"mode",
+			"result"})).(*prometheus.CounterVec)
+	m.machines = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_machines_ordered_total",
+		Help: "Machines started"},
+		[]string{labelPool})).(*prometheus.CounterVec)
+	m.removes = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_would_remove_total",
+		Help: "Shrink log lines"},
+		[]string{labelPool})).(*prometheus.CounterVec)
+	m.warnings = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_warnings_total",
+		Help: "Hub findings"},
+		[]string{"kind"})).(*prometheus.CounterVec)
+	m.pollers = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pollers",
+		Help: "Queue pollers"},
+		[]string{"queue"})).(*prometheus.GaugeVec)
+	m.reconcile = register(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "herzi_reconcile_duration_seconds",
+		Help: "Reconcile duration"})).(prometheus.Histogram)
+	m.sweep = register(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "herzi_sweep_duration_seconds",
+		Help: "Pool sweep duration"})).(prometheus.Histogram)
+	m.valid = register(prometheus.NewGauge(prometheus.GaugeOpts{Name: "herzi_config_valid",
+		Help: "Last configuration accepted"})).(prometheus.Gauge)
+	m.stuckAfter = register(prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "herzi_stuck_after_seconds", Help: "Configured open run alert threshold"})).(prometheus.Gauge)
 	return m
 }
 func flag(b bool) float64 {
@@ -79,11 +117,25 @@ func flag(b bool) float64 {
 
 // ObservePool publishes counted terms and formula outputs, resetting stale reasons
 // and classes. now is the reconcile's single frozen clock value.
-func (m *Metrics) ObservePool(f pipeline.PoolFacts, v pipeline.Verdict, intent pipeline.Intent, target, ceiling, need int, now time.Time) {
+func (m *Metrics) ObservePool(f pipeline.PoolFacts,
+	v pipeline.Verdict,
+	intent pipeline.Intent,
+	target,
+	ceiling,
+	need int,
+	now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	pool := string(f.Key)
-	values := map[string]float64{"demand": float64(f.Demand), "assigned": float64(f.Assigned), "claimable": float64(f.Claimable), "settling": float64(f.Settling), "stuck_agents": float64(f.StuckAgents), "open_runs": float64(len(f.Open)), "target": float64(target), "ceiling": float64(ceiling), "need": float64(need)}
+	values := map[string]float64{"demand": float64(f.Demand),
+		"assigned":     float64(f.Assigned),
+		"claimable":    float64(f.Claimable),
+		"settling":     float64(f.Settling),
+		"stuck_agents": float64(f.StuckAgents),
+		"open_runs":    float64(len(f.Open)),
+		"target":       float64(target),
+		"ceiling":      float64(ceiling),
+		"need":         float64(need)}
 	probe := false
 	switch i := intent.(type) {
 	case pipeline.Grow:
@@ -112,12 +164,26 @@ func (m *Metrics) ObservePool(f pipeline.PoolFacts, v pipeline.Verdict, intent p
 	var latest *pipeline.SlotRun
 	for i := range f.Closed {
 		r := &f.Closed[i]
-		if (r.Status == pipeline.StatusFailed || r.Status == pipeline.StatusTimedOut) && (latest == nil || r.Closed.After(latest.Closed) || (r.Closed.Equal(latest.Closed) && r.Slot > latest.Slot)) {
+		if (r.Status == pipeline.StatusFailed ||
+			r.Status == pipeline.StatusTimedOut) &&
+			(latest == nil ||
+				r.Closed.After(latest.Closed) ||
+				(r.Closed.Equal(latest.Closed) &&
+					r.Slot > latest.Slot)) {
 			latest = r
 		}
 	}
-	for _, class := range []string{"capacity", "other"} {
-		active := latest != nil && ((class == "capacity") == pipeline.IsCapacityFailure(latest.FailType))
+	for _, class := range []string{"capacity", classOther, "unknown"} {
+		actual := classOther
+		if latest != nil {
+			if pipeline.IsCapacityFailure(latest.FailType) {
+				actual = "capacity"
+			}
+			if latest.FailType == pipeline.FailUnknown {
+				actual = "unknown"
+			}
+		}
+		active := latest != nil && class == actual
 		m.failure.WithLabelValues(pool, class).Set(flag(active))
 	}
 }
@@ -168,7 +234,7 @@ func (m *Metrics) RegistrationError() error { return m.registrationErr }
 func BlockReasons(reasons []string) []string {
 	seen := make(map[string]bool)
 	for _, reason := range reasons {
-		kind := "other"
+		kind := classOther
 		switch {
 		case reason == "pool is unmanaged":
 			kind = "unmanaged"
@@ -197,7 +263,7 @@ func BlockReasons(reasons []string) []string {
 		case strings.Contains(reason, ": no replicas (autoscaling?)"):
 			kind = "replicas"
 		case strings.HasPrefix(reason, "pool "):
-			kind = "config"
+			kind = "config_invalid"
 		}
 		seen[kind] = true
 	}
@@ -208,3 +274,6 @@ func BlockReasons(reasons []string) []string {
 	slices.Sort(result)
 	return result
 }
+
+// SetStuckAfter exposes the effective configured alert threshold.
+func (m *Metrics) SetStuckAfter(d time.Duration) { m.stuckAfter.Set(d.Seconds()) }

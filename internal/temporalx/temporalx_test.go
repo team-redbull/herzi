@@ -278,11 +278,12 @@ func TestFailureTypes(t *testing.T) {
 		{"activity cause", []*historypb.HistoryEvent{failedEvent(activity)}, nil, pipeline.FailServerNotAvailable},
 		{"two wrappers", []*historypb.HistoryEvent{failedEvent(&failurepb.Failure{Cause: activity})}, nil, pipeline.FailServerNotAvailable},
 		{"direct application", []*historypb.HistoryEvent{failedEvent(application(pipeline.FailServerReserved))}, nil, pipeline.FailServerReserved},
-		{"no application info", []*historypb.HistoryEvent{failedEvent(&failurepb.Failure{Cause: &failurepb.Failure{}})}, nil, ""},
-		{"nil failure", []*historypb.HistoryEvent{failedEvent(nil)}, nil, ""},
-		{"history error", nil, errors.New("read failed"), ""},
-		{"empty history", nil, nil, ""},
-		{"unrelated event", []*historypb.HistoryEvent{{}}, nil, ""},
+		{"no application info", []*historypb.HistoryEvent{failedEvent(&failurepb.Failure{Cause: &failurepb.Failure{}})}, nil, pipeline.FailUnknown},
+		{"nil failure", []*historypb.HistoryEvent{failedEvent(nil)}, nil, pipeline.FailUnknown},
+		{"empty application type", []*historypb.HistoryEvent{failedEvent(application(""))}, nil, pipeline.FailUnknown},
+		{"history error", nil, errors.New("read failed"), pipeline.FailUnknown},
+		{"empty history", nil, nil, pipeline.FailUnknown},
+		{"unrelated event", []*historypb.HistoryEvent{{}}, nil, pipeline.FailUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeClient{
@@ -337,7 +338,7 @@ func TestHistoryTimeoutAndCancellation(t *testing.T) {
 				assert.NoError(t, r.Err)
 			}
 			require.Len(t, r.Slots, 1)
-			assert.Empty(t, r.Slots[0].FailType)
+			assert.Equal(t, pipeline.FailUnknown, r.Slots[0].FailType)
 			assert.Zero(t, active.Load())
 			assert.Less(t, time.Since(started), time.Second)
 		})
@@ -398,7 +399,7 @@ func TestHistoryErrorsAreRetried(t *testing.T) {
 	s := NewSweeper(Options{Client: f, MaxSlots: 1, Now: func() time.Time { return now }})
 	r := s.Sweep(context.Background(), "pool")
 	require.NoError(t, r.Err)
-	assert.Empty(t, r.Slots[0].FailType)
+	assert.Equal(t, pipeline.FailUnknown, r.Slots[0].FailType)
 	now = now.Add(10 * time.Second)
 	r = s.Sweep(context.Background(), "pool")
 	require.NoError(t, r.Err)
@@ -427,7 +428,7 @@ func TestFailureCacheSeparatesWorkflowIDsAndCachesUnknownTypes(t *testing.T) {
 		known := s.Sweep(context.Background(), "known")
 		require.NoError(t, unknown.Err)
 		require.NoError(t, known.Err)
-		assert.Empty(t, unknown.Slots[0].FailType)
+		assert.Equal(t, pipeline.FailUnknown, unknown.Slots[0].FailType)
 		assert.Equal(t, "known-type", known.Slots[0].FailType)
 		now = now.Add(10 * time.Second)
 	}
@@ -446,7 +447,7 @@ func TestNilHistoryIteratorIsBestEffort(t *testing.T) {
 	r := NewSweeper(Options{Client: f, MaxSlots: 1}).Sweep(context.Background(), "pool")
 	require.NoError(t, r.Err)
 	require.Len(t, r.Slots, 1)
-	assert.Empty(t, r.Slots[0].FailType)
+	assert.Equal(t, pipeline.FailUnknown, r.Slots[0].FailType)
 }
 
 func TestCachedDescribeErrorRemainsUnknown(t *testing.T) {

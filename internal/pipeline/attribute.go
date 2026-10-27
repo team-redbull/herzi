@@ -14,9 +14,14 @@ import (
 //nolint:gocyclo // a flat list of the design's attribution rules; each rule has its own test
 func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 	facts := make(map[PoolKey]PoolFacts, len(raw.InfraEnvs))
-	var warnings []Warning
+	warnings := slices.Clone(raw.Warnings)
 	for _, ie := range raw.InfraEnvs {
-		f := PoolFacts{Key: PoolKey(ie.Name), Managed: s.Manages(ie.Name), Paused: s.ForPool(ie.Name).Paused || ie.Annotations[kube.AnnotationPaused] == "true", Deleting: ie.Deleting, EarlyBound: ie.EarlyBound}
+		f := PoolFacts{Key: PoolKey(ie.Name),
+			Managed: s.Manages(ie.Name),
+			Paused: s.ForPool(ie.Name).Paused ||
+				ie.Annotations[kube.AnnotationPaused] == "true",
+			Deleting:   ie.Deleting,
+			EarlyBound: ie.EarlyBound}
 		if v, ok := ie.Annotations[kube.AnnotationBlockedUntil]; ok {
 			var err error
 			f.BlockedUntil, err = time.Parse(time.RFC3339, v)
@@ -24,6 +29,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 				warnings = append(warnings, Warning{Object: ie.Namespace + "/" + ie.Name, Msg: "invalid blocked-until annotation"})
 			}
 		}
+		f.State = ParseState(ie.Annotations[kube.AnnotationState])
 		facts[f.Key] = f
 	}
 	for _, np := range raw.NodePools {
@@ -99,6 +105,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 				f.Closed = append(f.Closed, r)
 			}
 		}
+		f.State = MergeState(f.State, raw.Sweep[key].Slots, raw.At, s.ForPool(string(key)))
 		slices.SortFunc(f.Open, func(a, b SlotRun) int { return cmp.Compare(a.Slot, b.Slot) })
 		slices.SortFunc(f.Closed, func(a, b SlotRun) int { return cmp.Compare(a.Slot, b.Slot) })
 		slices.SortFunc(f.Problems, func(a, b Problem) int { return cmp.Compare(a.Msg, b.Msg) })

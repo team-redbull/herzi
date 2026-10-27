@@ -29,7 +29,7 @@ func TestStoreLastGoodAndValid(t *testing.T) {
 		t.Fatal("successful update not published")
 	}
 	// Syntax, strictness, and semantic failures all keep the last good value.
-	for _, bad := range []string{"[", minimal + "typo: true\n", minimal + "pools: {test: {minFree: -1}}\n"} {
+	for _, bad := range []string{"[", minimal + "typo: true\n", minimal + "defaults: {minFree: -1}\n"} {
 		if err := s.Update([]byte(bad)); err == nil {
 			t.Fatal("bad update accepted")
 		}

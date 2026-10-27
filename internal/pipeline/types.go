@@ -2,6 +2,9 @@
 //
 //	Attribute -> Validate -> Decide -> Plan
 //
+// Attribute interprets RawSnapshot; Validate returns a pool-scoped Verdict; Decide returns an Intent;
+// Plan bounds a Grow by the open-run headroom and the HTTP API limit.
+//
 // Pure means: no clients, no goroutines, no time.Now(), no global state. Time and settings are passed
 // in. Everything risky about the controller's behaviour is a function in this package and is tested
 // by tables and properties without a cluster. See docs/design/herzi-design.md (Parts 1-3).
@@ -38,6 +41,7 @@ const (
 
 // Failure types raised by the install-server workflow (shared/exceptions.py in the workflows repo).
 const (
+	FailUnknown            = "unknown"
 	FailServerNotAvailable = "ServerNotAvailableError" // server-scan had nothing
 	FailServerReserved     = "ServerReservedError"     // every candidate was locked by another run
 )
@@ -49,19 +53,22 @@ func IsCapacityFailure(failType string) bool {
 
 // SlotRun is the latest execution of one slot id, as seen by Describe.
 type SlotRun struct {
+	RunID    string
+	Acquired bool
 	Slot     int
 	Status   string
 	Started  time.Time
 	Closed   time.Time // zero while Running
-	FailType string    // ApplicationError type, only for Failed; "" when unknown
+	FailType string    // ApplicationError type for Failed; FailUnknown if history is unavailable
 }
 
 // SweepResult is the outcome of describing every slot of one pool.
 // Err != nil means at least one Describe failed for a reason other than NotFound: the pool must be
 // blocked for the pass, never treated as "zero open runs".
 type SweepResult struct {
-	Slots []SlotRun // NotFound slots are omitted
-	Err   error
+	ObservedAt time.Time
+	Slots      []SlotRun // NotFound slots are omitted
+	Err        error
 }
 
 // PollerStatus is the number of pollers on each queue a run needs. Err != nil means unknown.
@@ -81,6 +88,7 @@ type ReadError struct {
 
 // RawSnapshot is everything one reconcile gathered, before any interpretation.
 type RawSnapshot struct {
+	Warnings  []Warning
 	InfraEnvs []kube.InfraEnv
 	NodePools []kube.NodePool
 	Agents    []kube.Agent
@@ -99,6 +107,7 @@ type Warning struct{ Object, Msg string }
 
 // PoolFacts is the interpreted state of one pool: the input of Validate and Decide.
 type PoolFacts struct {
+	State        State
 	Key          PoolKey
 	Managed      bool
 	Paused       bool

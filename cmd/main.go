@@ -218,7 +218,8 @@ func run(args []string) int {
 		return 1
 	}
 
-	setupLog.Info("Starting manager", "version", version, "commit", commit, "hub", hub.HubName, "agentNamespace", hub.AgentNamespace)
+	setupLog.Info("Starting manager", "version", version, "commit", commit,
+		"hub", hub.HubName, "agentNamespace", hub.AgentNamespace)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		return 1

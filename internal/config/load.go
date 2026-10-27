@@ -56,7 +56,7 @@ type configInput struct {
 }
 
 // Load implements Part 2, Config: "An unknown key under a pool is an error".
-// It applies defaults, canonicalizes the MCE name, and validates the complete result.
+// It validates the document, hub and defaults; merged pool errors remain available through PoolErrors.
 func Load(data []byte) (Config, error) {
 	var input configInput
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -151,7 +151,7 @@ func Load(data []byte) (Config, error) {
 		}
 		c.Pools[name] = o
 	}
-	problems = append(problems, c.Validate())
+	problems = append(problems, c.validateDocument())
 	if err := errors.Join(problems...); err != nil {
 		return Config{}, err
 	}

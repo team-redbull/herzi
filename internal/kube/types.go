@@ -21,6 +21,7 @@ const (
 	// StateKnownUnbound is the Agent status.debugInfo.state of a free, usable Agent.
 	StateKnownUnbound = "known-unbound"
 	// AnnotationBlockedUntil is written on an InfraEnv after an unclear POST (RFC 3339, UTC).
+	AnnotationState        = "herzi.redbull.io/state"
 	AnnotationBlockedUntil = "herzi.redbull.io/blocked-until"
 	// AnnotationPaused pauses ordering for one pool when its value is "true".
 	AnnotationPaused = "herzi.redbull.io/paused"
