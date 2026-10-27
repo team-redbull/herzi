@@ -9,9 +9,9 @@ api/<version>/*_types.go       CRD schemas (+kubebuilder markers)
 api/<version>/zz_generated.*   Auto-generated (DO NOT EDIT)
 internal/controller/*          Reconciliation logic
 internal/webhook/*             Validation/defaulting (if present)
-config/crd/bases/*             Generated CRDs (DO NOT EDIT)
-config/rbac/role.yaml          Generated RBAC (DO NOT EDIT)
-config/samples/*               Example CRs (edit these)
+charts/herzi/templates/*       Helm deployment templates
+charts/herzi/files/rbac-rules.yaml          Generated RBAC (DO NOT EDIT)
+charts/herzi/ci/*-values.yaml               Example CRs (edit these)
 Makefile                       Build/test/deploy commands
 PROJECT                        Kubebuilder metadata Auto-generated (DO NOT EDIT)
 ```
@@ -37,9 +37,7 @@ Multi-group layout organizes APIs by group name (e.g., `batch`, `apps`). Check t
 ## Critical Rules
 
 ### Never Edit These (Auto-Generated)
-- `config/crd/bases/*.yaml` - from `make manifests`
-- `config/rbac/role.yaml` - from `make manifests`
-- `config/webhook/manifests.yaml` - from `make manifests`
+- `charts/herzi/files/rbac-rules.yaml` - from `make manifests`
 - `**/zz_generated.*.go` - from `make generate`
 - `PROJECT` - from `kubebuilder [OPTIONS]`
 
@@ -159,10 +157,10 @@ make manifests generate
 # 2. Build & deploy
 export IMG=<registry>/<project>:tag
 make docker-build docker-push IMG=$IMG  # Or: kind load docker-image $IMG --name <cluster>
-make deploy IMG=$IMG
+make deploy VALUES=site-values.yaml IMG_REPO=<registry>/<project> IMG_TAG=tag
 
 # 3. Test
-kubectl apply -k config/samples/
+helm template herzi charts/herzi -f charts/herzi/ci/example-values.yaml
 
 # 4. Debug
 kubectl logs -n <project>-system deployment/<project>-controller-manager -c manager -f
@@ -250,49 +248,12 @@ Generated code includes: status conditions (`metav1.Condition`), finalizers, own
 
 ## Distribution Options
 
-### Option 1: YAML Bundle (Kustomize)
+### Helm Chart
 
-```bash
-# Generate dist/install.yaml from Kustomize manifests
-make build-installer IMG=<registry>/<project>:tag
-```
-
-**Key points:**
-- The `dist/install.yaml` is generated from Kustomize manifests (CRDs, RBAC, Deployment)
-- Commit this file to your repository for easy distribution
-- Users only need `kubectl` to install (no additional tools required)
-
-**Example:** Users install with a single command:
-```bash
-kubectl apply -f https://raw.githubusercontent.com/<org>/<repo>/<tag>/dist/install.yaml
-```
-
-### Option 2: Helm Chart
-
-```bash
-kubebuilder edit --plugins=helm/v2-alpha                      # Generates dist/chart/ (default)
-kubebuilder edit --plugins=helm/v2-alpha --output-dir=charts  # Generates charts/chart/
-```
-
-**For development:**
-```bash
-make helm-deploy IMG=<registry>/<project>:<tag>          # Deploy manager via Helm
-make helm-deploy IMG=$IMG HELM_EXTRA_ARGS="--set ..."    # Deploy with custom values
-make helm-status                                         # Show release status
-make helm-uninstall                                      # Remove release
-make helm-history                                        # View release history
-make helm-rollback                                       # Rollback to previous version
-```
-
-**For end users/production:**
-```bash
-helm install my-release ./<output-dir>/chart/ --namespace <ns> --create-namespace
-```
-
-**Important:** If you add webhooks or modify manifests after initial chart generation:
-1. Backup any customizations in `<output-dir>/chart/values.yaml` and `<output-dir>/chart/manager/manager.yaml`
-2. Re-run: `kubebuilder edit --plugins=helm/v2-alpha --force` (use same `--output-dir` if customized)
-3. Manually restore your custom values from the backup
+The deployment source of truth is `charts/herzi/README.md` and `charts/herzi/values.yaml`.
+Run `make helm-lint helm-test test-alerts` before shipping chart changes.
+Install with `make deploy VALUES=site-values.yaml IMG_REPO=<registry>/herzi IMG_TAG=<tag>`.
+Package with `make helm-package`.
 
 ### Publish Container Image
 

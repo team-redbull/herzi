@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "herzi.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "herzi.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
+  selector:
+    matchLabels:
+      {{- include "herzi.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml (merge (include "herzi.labels" . | fromYaml) .Values.podLabels) | nindent 8 }}
+      annotations:
+        {{- toYaml (merge (dict "checksum/startup-config" (include "herzi.startupChecksum" .)) .Values.podAnnotations) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "herzi.serviceAccount" . }}
+      terminationGracePeriodSeconds: 30
+      # No fixed runAsUser/runAsGroup: OpenShift restricted-v2 assigns a UID from the namespace range.
+      # runAsNonRoot holds because the image USER is numeric (65532).
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: manager
+          image: {{ printf "%s:%s" (required "image.repository is required" .Values.image.repository) (default .Chart.AppVersion .Values.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [/manager]
+          args:
+            - --leader-elect
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --config=/etc/herzi/config.yaml
+            {{- if .Values.metrics.tls.existingSecret }}
+            - --metrics-cert-path=/etc/herzi-metrics
+            {{- end }}
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - {name: health, containerPort: 8081}
+            - {name: https, containerPort: {{ .Values.metrics.port }}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources: {{ toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            - {name: GOMEMLIMIT, value: {{ .Values.goMemLimit | quote }}}
+            {{- if .Values.temporal.tls.existingSecret }}
+            - {name: HERZI_TEMPORAL_TLS_CA_FILE, value: {{ printf "/etc/herzi-temporal/%s" .Values.temporal.tls.caKey | quote }}}
+            {{- if .Values.temporal.mtls.enabled }}
+            - {name: HERZI_TEMPORAL_TLS_CERT_FILE, value: {{ printf "/etc/herzi-temporal/%s" .Values.temporal.mtls.certKey | quote }}}
+            - {name: HERZI_TEMPORAL_TLS_KEY_FILE, value: {{ printf "/etc/herzi-temporal/%s" .Values.temporal.mtls.keyKey | quote }}}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.temporal.apiKey.existingSecret }}
+            - name: HERZI_TEMPORAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.temporal.apiKey.existingSecret | quote }}
+                  key: {{ .Values.temporal.apiKey.key | quote }}
+            {{- end }}
+            {{- if .Values.installApi.bearerToken.existingSecret }}
+            - name: HERZI_API_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.installApi.bearerToken.existingSecret | quote }}
+                  key: {{ .Values.installApi.bearerToken.key | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/herzi, readOnly: true}
+            {{- if .Values.temporal.tls.existingSecret }}
+            - {name: temporal-tls, mountPath: /etc/herzi-temporal, readOnly: true}
+            {{- end }}
+            {{- if .Values.metrics.tls.existingSecret }}
+            - {name: metrics-tls, mountPath: /etc/herzi-metrics, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "herzi.fullname" . }}-config
+        {{- if .Values.temporal.tls.existingSecret }}
+        - name: temporal-tls
+          secret:
+            secretName: {{ .Values.temporal.tls.existingSecret | quote }}
+            defaultMode: 0444
+        {{- end }}
+        {{- if .Values.metrics.tls.existingSecret }}
+        - name: metrics-tls
+          secret:
+            secretName: {{ .Values.metrics.tls.existingSecret | quote }}
+            defaultMode: 0444
+        {{- end }}

@@ -1,0 +1,45 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "herzi.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "herzi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "herzi.selectorLabels" . | nindent 6 }}
+  policyTypes: [Egress, Ingress]
+  ingress:
+    {{- if .Values.metrics.enabled }}
+    - from:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.metricsNamespaceSelector | nindent 12 }}
+      ports:
+        - {port: {{ .Values.metrics.port }}, protocol: TCP}
+    {{- end }}
+  egress:
+    {{- range $dest := list .Values.networkPolicy.apiServer .Values.networkPolicy.temporal .Values.networkPolicy.installApi }}
+    {{- if $dest.cidrs }}
+    - to:
+        {{- range $dest.cidrs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        {{- range $dest.ports }}
+        - {port: {{ . }}, protocol: TCP}
+        {{- end }}
+    {{- end }}
+    {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ if eq .Values.networkPolicy.dns "openshift" }}openshift-dns{{ else }}kube-system{{ end }}
+          {{- if eq .Values.networkPolicy.dns "kubernetes" }}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+          {{- end }}
+      ports:
+        - {port: {{ if eq .Values.networkPolicy.dns "openshift" }}5353{{ else }}53{{ end }}, protocol: UDP}
+        - {port: {{ if eq .Values.networkPolicy.dns "openshift" }}5353{{ else }}53{{ end }}, protocol: TCP}
+{{- end }}

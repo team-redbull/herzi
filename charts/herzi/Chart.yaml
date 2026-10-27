@@ -1,0 +1,10 @@
+apiVersion: v2
+name: herzi
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+description: Add-only inventory controller for MCE hub machine pools
+home: https://github.com/team-redbull/herzi
+sources:
+  - https://github.com/team-redbull/herzi

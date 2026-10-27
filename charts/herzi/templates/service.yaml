@@ -1,0 +1,14 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "herzi.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "herzi.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "herzi.selectorLabels" . | nindent 4 }}
+  ports:
+    - {name: https, port: {{ .Values.metrics.port }}, targetPort: https, protocol: TCP}
+{{- end }}

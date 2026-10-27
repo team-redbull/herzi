@@ -1,5 +1,7 @@
 # herzi
 
+Deployment source of truth during the documentation migration: [Helm chart guide](charts/herzi/README.md).
+
 herzi is the inventory controller for an MCE hub. It keeps each opted-in
 InfraEnv's spare machines aligned with HyperShift NodePool demand. NodePools
 express worker demand, Agents represent machines, and Temporal install runs

@@ -7,33 +7,34 @@ IMG ?= herzi:dev
 VERSION ?= dev
 COMMIT ?= unknown
 CONTAINER_TOOL ?= docker
-KUBECTL ?= kubectl
+HELM ?= helm
+NAMESPACE ?= herzi-system
+VALUES ?=
+IMG_REPO ?=
+IMG_TAG ?=
 LOCALBIN ?= $(CURDIR)/bin
-KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
 GOVULNCHECK ?= $(LOCALBIN)/govulncheck
-KUSTOMIZE_VERSION ?= v5.8.1
 CONTROLLER_TOOLS_VERSION ?= v0.22.0
 ENVTEST_VERSION ?= v0.25.0
 ENVTEST_K8S_VERSION ?= 1.37.0
 GOLANGCI_LINT_VERSION ?= v2.15.0
 GOVULNCHECK_VERSION ?= v1.9.0
 YEAR ?= $(shell date +%Y)
-CONFIG ?= config/samples/herzi-config.yaml
+CONFIG ?= /tmp/herzi-dev-config.yaml
 GO_PACKAGES ?= ./cmd/... ./internal/...
 # Exclude the controller's envtest suite from unit tests. No ./... across work packages.
 UNIT_PACKAGES = $$(go list ./internal/... | sed '\|/internal/controller\(/\|$$\)|d')
 INTEGRATION_PACKAGES ?= ./internal/controller/...
-ignore-not-found ?= false
 
-.PHONY: all help manifests generate fmt vet test test-integration lint lint-fix lint-config vuln ci build run docker-build docker-push docker-buildx build-installer deploy undeploy lint-manifests test-alerts check-rbac manifests-drift kustomize controller-gen envtest setup-envtest golangci-lint govulncheck
+.PHONY: all help manifests generate fmt vet test test-integration lint lint-fix lint-config vuln ci build run docker-build docker-push docker-buildx deploy undeploy helm-lint helm-test helm-package test-alerts manifests-drift controller-gen envtest setup-envtest golangci-lint govulncheck
 all: build
 help: ## Display targets.
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-manifests: controller-gen ## Generate controller RBAC from WP6 markers; never edit role.yaml.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role paths="./internal/controller/..." output:rbac:artifacts:config=config/rbac
+manifests: controller-gen ## Generate chart manager RBAC from controller markers.
+	./hack/gen-rbac.sh
 generate: controller-gen ## Generate DeepCopy methods if API objects are added.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./internal/..."
 fmt: ## Format Go sources.
@@ -52,11 +53,12 @@ lint-config: golangci-lint ## Validate lint configuration.
 	"$(GOLANGCI_LINT)" config verify
 vuln: govulncheck ## Check reachable Go vulnerabilities.
 	"$(GOVULNCHECK)" $(GO_PACKAGES)
-ci: lint vet test vuln ## Local CI checks.
+ci: lint vet test vuln helm-lint helm-test test-alerts manifests-drift ## Local CI checks.
 build: ## Build the static controller binary.
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)' -o bin/manager ./cmd
 run: ## Run against the current kubeconfig with the sample config.
+	./hack/dev-config.sh > "$(CONFIG)"
 	go run ./cmd --leader-elect=false --config="$(CONFIG)" --health-probe-bind-address=:8081 --metrics-bind-address=:8443
 docker-build: ## Build an image without pushing.
 	$(CONTAINER_TOOL) build --build-arg VERSION="$(VERSION)" --build-arg COMMIT="$(COMMIT)" -t "$(IMG)" .
@@ -65,44 +67,26 @@ docker-push: ## Push an explicitly selected image.
 PLATFORMS ?= linux/amd64,linux/arm64
 docker-buildx: ## Build and push multi-platform images using buildx.
 	$(CONTAINER_TOOL) buildx build --platform="$(PLATFORMS)" --build-arg VERSION="$(VERSION)" --build-arg COMMIT="$(COMMIT)" --push -t "$(IMG)" .
-build-installer: manifests kustomize ## Render an installation bundle (no CRDs).
-	mkdir -p dist
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller="$(IMG)"
-	"$(KUSTOMIZE)" build config/default > dist/install.yaml
-deploy: manifests kustomize ## Deploy to the current kubeconfig context (create the herzi-config ConfigMap too: see docs/ops/operating.md).
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller="$(IMG)"
-	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
-undeploy: kustomize ## Delete the installation, including its namespace; back up secrets first.
-	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
-lint-manifests: ## Render all trees; validate known Kubernetes schemas when kubeconform exists.
-	@for tree in default manager rbac samples prometheus network-policy overlays/tls overlays/mtls overlays/example; do \
-	  output=$$(mktemp); \
-	  "$(KUBECTL)" kustomize config/$$tree > "$$output"; \
-	  if command -v kubeconform >/dev/null 2>&1; then \
-	    kubeconform -strict -summary -skip ServiceMonitor,PrometheusRule "$$output"; \
-	  else echo "kubeconform unavailable: rendered $$tree only"; fi; \
-	  rm -f "$$output"; \
-	done
+helm-lint: ## Strict lint of all chart examples.
+	@for values in charts/herzi/ci/*-values.yaml; do "$(HELM)" lint --strict charts/herzi -f "$$values"; done
+helm-test: ## Assert rendered chart behavior and validation.
+	HELM="$(HELM)" ./hack/test-chart.sh
+helm-package: helm-lint ## Package the chart into bin/.
+	mkdir -p bin
+	"$(HELM)" package charts/herzi --destination bin
 
-test-alerts: ## Unit-test the shipped alert rules with promtool.
+deploy: ## Install or upgrade with explicitly selected site values and image.
+	@test -n "$(VALUES)" -a -n "$(IMG_REPO)" -a -n "$(IMG_TAG)" || { echo "deploy requires VALUES, IMG_REPO and IMG_TAG" >&2; exit 1; }
+	"$(HELM)" upgrade --install herzi charts/herzi -n "$(NAMESPACE)" --create-namespace -f "$(VALUES)" --set-string image.repository="$(IMG_REPO)" --set-string image.tag="$(IMG_TAG)"
+undeploy: ## Uninstall the Helm release; leave the namespace and external secrets intact.
+	"$(HELM)" uninstall herzi -n "$(NAMESPACE)"
+test-alerts: ## Test the shipped native alert rules.
 	./hack/test-alerts.sh
-
-check-rbac: ## Fail unless the default install grants the controller what it reads and patches.
-	@out=$$(mktemp); "$(KUBECTL)" kustomize config/default > "$$out"; status=0; \
-	for need in 'name: manager-role' 'name: manager-rolebinding' '- agents' '- infraenvs' '- nodepools' 'namespace: herzi-system'; do \
-	  grep -q -- "$$need" "$$out" || { echo "check-rbac: rendered config/default lacks '$$need'"; status=1; }; \
-	done; \
-	grep -q 'kind: ClusterRole$$' "$$out" || { echo "check-rbac: no ClusterRole rendered"; status=1; }; \
-	rm -f "$$out"; exit $$status
-
-manifests-drift: manifests ## Fail when the committed role.yaml differs from what the markers generate.
-	@git diff --exit-code -- config/rbac/role.yaml || { echo "manifests-drift: run 'make manifests' and commit config/rbac/role.yaml"; exit 1; }
+manifests-drift: manifests ## Compare generated RBAC with the committed file.
+	git diff --exit-code -- charts/herzi/files/rbac-rules.yaml
 
 $(LOCALBIN):
 	mkdir -p "$(LOCALBIN)"
-kustomize: $(KUSTOMIZE)
-$(KUSTOMIZE): | $(LOCALBIN)
-	GOBIN="$(LOCALBIN)" go install sigs.k8s.io/kustomize/kustomize/v5@$(KUSTOMIZE_VERSION)
 controller-gen: $(CONTROLLER_GEN)
 $(CONTROLLER_GEN): | $(LOCALBIN)
 	GOBIN="$(LOCALBIN)" go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)

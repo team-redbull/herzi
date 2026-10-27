@@ -1,0 +1,544 @@
+{
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string"
+        }
+      }
+    },
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "goMemLimit": {
+      "type": "string"
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "metricsReader": {
+          "type": "object",
+          "properties": {
+            "subjects": {
+              "type": "array"
+            }
+          }
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "interval": {
+          "type": "string",
+          "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+        },
+        "reconcileTimeout": {
+          "type": "string",
+          "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+        },
+        "hubName": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "agentNamespace": {
+          "type": "string"
+        },
+        "installURL": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^https?://[^/\\s]+.*$"
+        },
+        "maxSlots": {
+          "type": "integer",
+          "const": 100
+        },
+        "ambiguousWait": {
+          "type": "string",
+          "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+        },
+        "stuckAfter": {
+          "type": "string",
+          "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+        },
+        "temporalAddress": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "temporalNamespace": {
+          "type": "string"
+        },
+        "activityQueue": {
+          "type": "string"
+        },
+        "workflowQueue": {
+          "type": "string"
+        },
+        "segmentQueue": {
+          "type": "string"
+        },
+        "defaults": {
+          "type": "object",
+          "properties": {
+            "highPct": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "minFree": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "maxOpenRunsPerPool": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "probeInterval": {
+              "type": "string",
+              "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+            },
+            "drawGrace": {
+              "type": "string",
+              "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+            },
+            "failureMemory": {
+              "type": "string",
+              "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+            },
+            "settlingMax": {
+              "type": "string",
+              "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+            },
+            "dryRunGrow": {
+              "type": "boolean"
+            },
+            "paused": {
+              "type": "boolean"
+            },
+            "lowPct": {
+              "description": "lowPct was removed; delete lowPct",
+              "allOf": [
+                {
+                  "enum": [
+                    "lowPct was removed; delete lowPct"
+                  ]
+                },
+                {
+                  "not": {}
+                }
+              ]
+            },
+            "minBand": {
+              "description": "minBand was removed; delete minBand",
+              "allOf": [
+                {
+                  "enum": [
+                    "minBand was removed; delete minBand"
+                  ]
+                },
+                {
+                  "not": {}
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "pools": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "highPct": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "minFree": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "maxOpenRunsPerPool": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "probeInterval": {
+                "type": "string",
+                "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+              },
+              "drawGrace": {
+                "type": "string",
+                "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+              },
+              "failureMemory": {
+                "type": "string",
+                "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+              },
+              "settlingMax": {
+                "type": "string",
+                "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
+              },
+              "dryRunGrow": {
+                "type": "boolean"
+              },
+              "paused": {
+                "type": "boolean"
+              },
+              "lowPct": {
+                "description": "lowPct was removed; delete lowPct",
+                "allOf": [
+                  {
+                    "enum": [
+                      "lowPct was removed; delete lowPct"
+                    ]
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
+              },
+              "minBand": {
+                "description": "minBand was removed; delete minBand",
+                "allOf": [
+                  {
+                    "enum": [
+                      "minBand was removed; delete minBand"
+                    ]
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "hubName",
+        "installURL",
+        "temporalAddress"
+      ]
+    },
+    "temporal": {
+      "type": "object",
+      "properties": {
+        "tls": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "caKey": {
+              "type": "string"
+            }
+          }
+        },
+        "mtls": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "certKey": {
+              "type": "string"
+            },
+            "keyKey": {
+              "type": "string"
+            }
+          }
+        },
+        "apiKey": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "installApi": {
+      "type": "object",
+      "properties": {
+        "bearerToken": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string"
+        },
+        "scrapeTimeout": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object",
+          "properties": {}
+        },
+        "tlsConfig": {
+          "type": "object",
+          "properties": {
+            "insecureSkipVerify": {
+              "type": "boolean"
+            }
+          }
+        },
+        "bearerTokenSecret": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    "prometheusRule": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "labels": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "dns": {
+          "type": "string",
+          "enum": [
+            "openshift",
+            "kubernetes"
+          ]
+        },
+        "metricsNamespaceSelector": {
+          "type": "object",
+          "properties": {
+            "matchLabels": {
+              "type": "object",
+              "properties": {
+                "metrics": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "apiServer": {
+          "type": "object",
+          "properties": {
+            "cidrs": {
+              "type": "array"
+            },
+            "ports": {
+              "type": "array"
+            }
+          }
+        },
+        "temporal": {
+          "type": "object",
+          "properties": {
+            "cidrs": {
+              "type": "array"
+            },
+            "ports": {
+              "type": "array"
+            }
+          }
+        },
+        "installApi": {
+          "type": "object",
+          "properties": {
+            "cidrs": {
+              "type": "array"
+            },
+            "ports": {
+              "type": "array"
+            }
+          }
+        }
+      }
+    },
+    "nodeSelector": {
+      "type": "object",
+      "properties": {}
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object",
+      "properties": {}
+    },
+    "topologySpreadConstraints": {
+      "type": "array"
+    },
+    "priorityClassName": {
+      "type": "string"
+    },
+    "podAnnotations": {
+      "type": "object",
+      "properties": {}
+    },
+    "podLabels": {
+      "type": "object",
+      "properties": {}
+    },
+    "imagePullSecrets": {
+      "type": "array"
+    },
+    "extraArgs": {
+      "type": "array"
+    },
+    "extraEnv": {
+      "type": "array"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "temporal": {
+            "properties": {
+              "mtls": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "temporal": {
+            "properties": {
+              "tls": {
+                "properties": {
+                  "existingSecret": {
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

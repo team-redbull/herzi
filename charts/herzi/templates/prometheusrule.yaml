@@ -1,0 +1,11 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "herzi.fullname" . }}-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- toYaml (merge (include "herzi.labels" . | fromYaml) .Values.prometheusRule.labels) | nindent 4 }}
+spec:
+  {{- .Files.Get "files/alerts.rules.yaml" | nindent 2 }}
+{{- end }}

@@ -1,0 +1,37 @@
+image:
+  repository: ghcr.io/team-redbull/herzi
+config:
+  interval: 120s
+  reconcileTimeout: 60s
+  hubName: ocp4-example
+  agentNamespace: inventory
+  installURL: https://workflows.example.invalid/workflows/server-lifecycle/install-server
+  maxSlots: 100
+  ambiguousWait: 5m
+  stuckAfter: 2h
+  temporalAddress: temporal.example.invalid:7233
+  temporalNamespace: default
+  activityQueue: server-lifecycle-activity-ocp4-example
+  workflowQueue: install-server-workflow
+  segmentQueue: segment-lifecycle-activity
+  defaults:
+    highPct: 10
+    minFree: 2
+    maxOpenRunsPerPool: 15
+    probeInterval: 20m
+    drawGrace: 2m
+    failureMemory: 6h
+    settlingMax: 60m
+    dryRunGrow: false
+    paused: false
+  pools:
+    32-128-zone-1:
+      minFree: 5
+      maxOpenRunsPerPool: 8
+      dryRunGrow: true
+    16-64-zone-2:
+      paused: true
+      dryRunGrow: true
+    8-32-zone-1:
+      highPct: 25
+      dryRunGrow: true
