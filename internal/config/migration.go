@@ -9,8 +9,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// RemovedKeyError identifies an obsolete configuration key without retaining YAML values.
-// Its message is safe to include in reload diagnostics.
+// RemovedKeyError omits YAML values so its message is safe for reload diagnostics.
 type RemovedKeyError struct{ path, key string }
 
 func (e *RemovedKeyError) Error() string {
@@ -21,9 +20,6 @@ func (e *RemovedKeyError) Error() string {
 }
 
 func removedPoolKeys(data []byte) error {
-	// Decode once into generic maps: yaml.v3 resolves aliases and merge sequences,
-	// rejecting cyclic aliases itself. Explicit keys shadow merged keys; only the
-	// effective document counts, just as in the real configuration decoder.
 	var doc map[string]any
 	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&doc); err != nil {
 		return fmt.Errorf("decode config: %w", err)

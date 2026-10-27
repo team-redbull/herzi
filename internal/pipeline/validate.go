@@ -7,10 +7,7 @@ import (
 	"github.com/team-redbull/herzi/internal/config"
 )
 
-// Validate implements design Part 2, "Stage 2 — Validate (pure, fail closed,
-// pool-scoped)": "Blocked => no mutating action; metrics and a warning only".
-// ASSUMPTION: merged configuration validation belongs to WP2. This stage uses
-// the explicit WP1 blocking causes; PoolConfig has no validation method in the contract.
+// Validate blocks only the affected pool; blocked verdicts prohibit mutating actions.
 func Validate(f PoolFacts, raw RawSnapshot, _ config.PoolConfig) Verdict {
 	v := Verdict{Key: f.Key}
 	if !f.Managed {

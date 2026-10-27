@@ -9,7 +9,6 @@ import (
 	"github.com/team-redbull/herzi/internal/config"
 )
 
-// State retains evidence independently of Temporal's reusable slot identities.
 type State struct {
 	CapFailAt      time.Time `json:"capFailAt,omitempty"`
 	OtherFails     []Failure `json:"otherFails,omitempty"`
@@ -17,13 +16,12 @@ type State struct {
 	ProbeNotBefore time.Time `json:"probeNotBefore,omitempty"`
 }
 
-// Failure identifies an execution, rather than its reusable workflow slot.
 type Failure struct {
 	RunID    string    `json:"runId"`
 	ClosedAt time.Time `json:"closedAt"`
 }
 
-// ParseState degrades missing, oversized and malformed annotations to sweep-only evidence.
+// ParseState falls back to sweep-only evidence for missing, oversized or malformed state.
 func ParseState(value string) State {
 	var s State
 	if len(value) > 1024 || json.Unmarshal([]byte(value), &s) != nil {
@@ -35,7 +33,7 @@ func ParseState(value string) State {
 	return s
 }
 
-// EncodeState returns bounded compact JSON. Untrusted oversized run IDs cannot grow the annotation.
+// EncodeState returns "{}" if serialization fails or exceeds the annotation bound.
 func EncodeState(s State) string {
 	b, err := json.Marshal(s)
 	if err != nil || len(b) > 1024 {
@@ -44,7 +42,7 @@ func EncodeState(s State) string {
 	return string(b)
 }
 
-// MergeState monotonically combines unexpired evidence and deduplicates by execution ID.
+// MergeState retains unexpired evidence monotonically and deduplicates by execution ID.
 func MergeState(prev State, evidence []SlotRun, now time.Time, p config.PoolConfig) State {
 	s := prev
 	s.OtherFails = slices.Clone(prev.OtherFails)
@@ -102,7 +100,7 @@ func collectFailures(previous []Failure, evidence []SlotRun, cutoff time.Time) [
 			continue
 		}
 		id := r.RunID
-		// Older ports without IDs degrade to evidence visible in this sweep.
+		// Missing run IDs use close times to avoid merging all unidentified failures.
 		if id == "" {
 			id = r.Closed.Format(time.RFC3339Nano)
 		}

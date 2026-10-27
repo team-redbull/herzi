@@ -8,8 +8,6 @@ import (
 	"pgregory.net/rapid"
 )
 
-// TestDecideDesignTable reproduces every row of Part 2's "Test table for Decide".
-// Custom rows use an explicit buffer; the large wave uses defaults.
 func TestDecideDesignTable(t *testing.T) {
 	cap21 := closed(StatusFailed, FailServerNotAvailable, 21)
 	for _, tt := range []struct {
@@ -113,7 +111,7 @@ func TestProbeProofTable(t *testing.T) {
 		{"failure at memory", []SlotRun{closed(StatusFailed, FailServerNotAvailable, 360)}, nil, Grow{Key: "a", Need: 1, Mode: Probe}},
 		{"probe at interval", []SlotRun{closed(StatusFailed, FailServerNotAvailable, 20)}, nil, Grow{Key: "a", Need: 1, Mode: Probe}},
 		{"probe before interval", []SlotRun{{Status: StatusFailed, FailType: FailServerNotAvailable, Closed: clockTime().Add(-p.ProbeInterval + time.Nanosecond)}}, nil, Hold{Key: "a", Reason: HoldProbeWait}},
-		// Describe exposes only the latest execution per slot; overwritten evidence is absent.
+
 		{"slot reuse overwrote failure with young run", nil, []SlotRun{running(1)}, Grow{Key: "a", Need: 7, Mode: Full}},
 		{"slot reuse overwrote proof with failure", []SlotRun{failure}, nil, Grow{Key: "a", Need: 1, Mode: Probe}},
 		{"slot reuse new mature run proves remaining failure", []SlotRun{failure}, []SlotRun{running(3)}, Grow{Key: "a", Need: 7, Mode: Full}},

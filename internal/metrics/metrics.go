@@ -1,5 +1,4 @@
-// Package metrics implements docs/PLAN.md's Metrics catalogue and design Part 2:
-// "gauges every pass, even when blocked".
+// Package metrics publishes pool decisions and controller health to Prometheus.
 package metrics
 
 import (
@@ -15,8 +14,7 @@ import (
 	"github.com/team-redbull/herzi/internal/pipeline"
 )
 
-// Metrics owns collectors registered with the caller's registry. Methods are safe
-// for concurrent pools; no collector uses the process-global registry.
+// Metrics uses the caller's registry and is safe for concurrent pools.
 type Metrics struct {
 	registrationErr  error
 	mu               sync.Mutex
@@ -31,9 +29,7 @@ type Metrics struct {
 	stuckAfter       prometheus.Gauge
 }
 
-// New registers every metric in the catalogue. The caller supplies a fresh or
-// application-owned Registerer; duplicate registrations reuse the same collector.
-// labelPool is the one label every per-pool series carries.
+// New reuses duplicate collectors; callers must check RegistrationError before use.
 const labelPool = "pool"
 const classOther = "other"
 
@@ -48,8 +44,6 @@ func New(reg prometheus.Registerer) *Metrics {
 			if e, ok := err.(prometheus.AlreadyRegisteredError); ok && reflect.TypeOf(e.ExistingCollector) == reflect.TypeOf(c) {
 				return e.ExistingCollector
 			}
-			// The fixed New API has no error return. Controller.New checks this
-			// error before accepting Metrics, so conflicts cannot go unnoticed.
 			m.registrationErr = errors.Join(m.registrationErr, fmt.Errorf("register metric: %w", err))
 		}
 		return c
@@ -111,8 +105,7 @@ func flag(b bool) float64 {
 	return 0
 }
 
-// ObservePool publishes counted terms and formula outputs, resetting stale reasons
-// and classes. now is the reconcile's single frozen clock value.
+// ObservePool resets stale reasons and classes; now must be the pass's frozen clock value.
 func (m *Metrics) ObservePool(f pipeline.PoolFacts,
 	v pipeline.Verdict,
 	intent pipeline.Intent,
@@ -202,7 +195,6 @@ func (m *Metrics) Successful(pool string, now time.Time) {
 	m.gauges["last_successful_reconcile_timestamp_seconds"].WithLabelValues(pool).Set(float64(now.UnixNano()) / 1e9)
 }
 
-// ForgetPool bounds cardinality after deletion or removal from managed config.
 func (m *Metrics) ForgetPool(pool string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -216,13 +208,9 @@ func (m *Metrics) ForgetPool(pool string) {
 	m.machines.DeleteLabelValues(pool)
 }
 
-// RegistrationError reports registry conflicts without panicking. Controller.New
-// rejects Metrics with a registration error before reconciling any pool.
 func (m *Metrics) RegistrationError() error { return m.registrationErr }
 
-// BlockReasons maps the pipeline's diagnostic strings to a finite label
-// vocabulary. Neither timestamps, object names nor external error text belongs
-// in a Prometheus label (or in the change-only Info log).
+// BlockReasons bounds label cardinality by excluding object names, timestamps and external errors.
 func BlockReasons(reasons []string) []string {
 	seen := make(map[string]bool)
 	for _, reason := range reasons {
@@ -267,5 +255,4 @@ func BlockReasons(reasons []string) []string {
 	return result
 }
 
-// SetStuckAfter exposes the effective configured alert threshold.
 func (m *Metrics) SetStuckAfter(d time.Duration) { m.stuckAfter.Set(d.Seconds()) }

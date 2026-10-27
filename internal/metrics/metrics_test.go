@@ -60,7 +60,6 @@ func TestCatalogueAndForget(t *testing.T) {
 			require.Equal(t, 3600.0, family.Metric[0].Gauge.GetValue())
 		}
 	}
-	// Reset stale blocked/probe/failure state on a later successful pass.
 	m.ObservePool(pipeline.PoolFacts{Key: "p"}, pipeline.Verdict{}, pipeline.Hold{Reason: pipeline.HoldAtOrAboveTarget}, 2, 2, now)
 	families, err = reg.Gather()
 	require.NoError(t, err)
@@ -88,7 +87,6 @@ func TestProbeAndLatestFailure(t *testing.T) {
 	for _, intent := range []pipeline.Intent{pipeline.Hold{Reason: pipeline.HoldProbeWait}, pipeline.Hold{Reason: pipeline.HoldProbeRunning}, pipeline.Grow{Mode: pipeline.Full}} {
 		m.ObservePool(pipeline.PoolFacts{Key: "p", Closed: []pipeline.SlotRun{{Slot: 1, Status: pipeline.StatusFailed, Closed: now, FailType: pipeline.FailServerReserved}, {Slot: 2, Status: pipeline.StatusTimedOut, Closed: now}}}, pipeline.Verdict{}, intent, 1, 1, now)
 	}
-	// Calling New again reuses collectors instead of requiring global state.
 	m2 := New(reg)
 	m2.SetConfigValid(false)
 	m2.Warning("warning")
@@ -156,7 +154,6 @@ func TestRemovedMetricsAreNotRegistered(t *testing.T) {
 	for _, family := range families {
 		require.NotContains(t, []string{"herzi_would_remove_total", "herzi_pool_ceiling"}, family.GetName())
 	}
-	// Registration also detects an unobserved vector, which Gather would omit.
 	require.NoError(t, reg.Register(prometheus.NewGauge(prometheus.GaugeOpts{Name: "herzi_pool_ceiling", Help: "retired"})))
 	require.NoError(t, reg.Register(prometheus.NewCounter(prometheus.CounterOpts{Name: "herzi_would_remove_total", Help: "retired"})))
 }

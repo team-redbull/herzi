@@ -63,7 +63,7 @@ func TestF1SlowRecheckCannotSpendStaleSweep(t *testing.T) {
 	sweep := &invalidatingSweep{RunSweeper: f.sweep}
 	f.r.Sweeper = sweep
 	f.reconcile(t, "p")
-	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 2}}, f.install.requests) // target 12 at the 10% default
+	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 2}}, f.install.requests)
 	require.Equal(t, 1, sweep.invalidated)
 	f.r.markAttempt("p", base.Add(100*time.Millisecond))
 	f.now = base.Add(9 * time.Second)
@@ -75,7 +75,6 @@ func TestF1SlowRecheckCannotSpendStaleSweep(t *testing.T) {
 	}}
 	f.reconcile(t, "p")
 	require.Len(t, f.install.requests, 1)
-	// A later observation, rather than elapsed time alone, permits spending.
 	f.r.Reader = f.c
 	f.now = base.Add(12 * time.Second)
 	f.sweep.result.ObservedAt = f.now
@@ -163,7 +162,6 @@ func TestF4StatePersistsAcrossRestartAndProbePrewrite(t *testing.T) {
 	f.r.Client = c
 	f.reconcile(t, "p")
 	require.Len(t, f.install.requests, 1)
-	// State evidence patch, then marker+probe state in a single patch, then clear marker.
 	require.Len(t, c.bodies, 3)
 	a := c.bodies[1]["metadata"].(map[string]any)["annotations"].(map[string]any)
 	require.Len(t, a, 2)
@@ -235,7 +233,6 @@ func TestF4CachedStateCannotEraseDurableFailures(t *testing.T) {
 	state, err := f.r.persistState(t.Context(), client.ObjectKeyFromObject(infra("p")), "", stale, f.now, config.Defaults())
 	require.NoError(t, err)
 	require.Equal(t, current, state)
-	// A failed durable read or patch prevents an order from losing observed evidence.
 	f.r.Reader = failingReader{Reader: f.c, get: true}
 	_, err = f.r.persistState(t.Context(), client.ObjectKeyFromObject(infra("p")), "", stale, f.now, config.Defaults())
 	require.Error(t, err)

@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// The expected strings are copied from the workflows repo's tests/test_bond_selection.py
-// (TestWorkflowIdKeysOnTheHubAndTheCandidatePool).
 func TestPinnedToThePythonBuilders(t *testing.T) {
 	cases := []struct{ got, want string }{
 		{PoolSlot("ocp4-mce-tlv-01", "dell-r650-tlv-64c-1024gb", 1), "install-server-ocp4-mce-tlv-01_dell-r650-tlv-64c-1024gb_1"},

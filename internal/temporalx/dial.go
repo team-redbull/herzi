@@ -10,23 +10,19 @@ import (
 	"go.temporal.io/sdk/client"
 )
 
-// DialOptions describes how herzi reaches Temporal. Plain gRPC is the default (every client inside the
-// hub uses it); a CA file turns on TLS verified against that CA, and a cert+key pair adds mTLS.
-// Verification is never switched off.
+// DialOptions uses plaintext by default; CAFile enables verified TLS and CertFile/KeyFile add mTLS.
 type DialOptions struct {
-	Address    string // host:port
+	Address    string
 	Namespace  string
-	CAFile     string // optional PEM bundle
-	CertFile   string // optional client certificate (requires KeyFile)
+	CAFile     string
+	CertFile   string
 	KeyFile    string
-	ServerName string // optional TLS server name override
-	APIKey     string // optional; never logged
-	Identity   string // shown in Temporal as the client identity
+	ServerName string
+	APIKey     string
+	Identity   string
 }
 
-// Dial returns a LAZY client: it does not connect until the first call, so the controller starts and
-// serves its probes even while Temporal is down. An unreachable Temporal then surfaces as a sweep or
-// poller error, which blocks the affected pools (fail closed) instead of crash-looping the pod.
+// Dial returns a lazy client so Temporal outages block pools without preventing startup probes.
 func Dial(o DialOptions) (client.Client, error) {
 	if o.Address == "" {
 		return nil, errors.New("temporal address is empty")

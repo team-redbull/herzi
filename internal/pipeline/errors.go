@@ -2,8 +2,8 @@ package pipeline
 
 import "errors"
 
-// ErrAmbiguous marks an Install whose outcome is unknown (timeout, connection error, 5xx).
+// ErrAmbiguous means the install outcome is unknown; callers must block the pool.
 var ErrAmbiguous = errors.New("install outcome is ambiguous")
 
-// ErrRejected marks a request the API refused (4xx, e.g. 422): our bug, nothing started.
+// ErrRejected means the API refused the request and nothing started.
 var ErrRejected = errors.New("install request rejected")

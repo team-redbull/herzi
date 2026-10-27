@@ -1,2 +1,9 @@
+.claude-flow/
+.swarm/
+*.rvf*
+ruvector.db*
+.git*
 *.tgz
-.git/
+*.md
+ci/
+tests/

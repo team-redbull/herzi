@@ -1,9 +1,4 @@
-// Package kube holds small, typed views over the three objects herzi reads but does not own:
-// assisted-service InfraEnv and Agent, and HyperShift NodePool.
-//
-// They are read as unstructured and parsed into these views on purpose: importing the typed
-// API modules pulls in well over a hundred modules (including an ORM) and a ~10 MB larger binary
-// for about a dozen fields. The views are the ONLY place that knows the raw field paths.
+// Package kube parses small typed views of external InfraEnv, Agent and NodePool objects.
 package kube
 
 import (
@@ -13,21 +8,19 @@ import (
 )
 
 const (
-	// LabelInfraEnv is stamped on every Agent by assisted-service and is the ONLY key a NodePool
-	// agentLabelSelector may use (see the design: the selector contract).
+	// LabelInfraEnv is the only supported NodePool agent selector key.
 	LabelInfraEnv = "infraenvs.agent-install.openshift.io"
-	// LabelAgentMachineRef is set by cluster-api-provider-agent while an AgentMachine holds an Agent.
+	// LabelAgentMachineRef marks an Agent held by an AgentMachine.
 	LabelAgentMachineRef = "agentMachineRef"
-	// StateKnownUnbound is the Agent status.debugInfo.state of a free, usable Agent.
+
 	StateKnownUnbound = "known-unbound"
-	// AnnotationBlockedUntil is written on an InfraEnv after an unclear POST (RFC 3339, UTC).
+
 	AnnotationState        = "herzi.redbull.io/state"
 	AnnotationBlockedUntil = "herzi.redbull.io/blocked-until"
-	// AnnotationPaused pauses ordering for one pool when its value is "true".
+	// AnnotationPaused pauses pool ordering only when its value is "true".
 	AnnotationPaused = "herzi.redbull.io/paused"
 )
 
-// apiVersion is the served version of all three kinds.
 const apiVersion = "v1beta1"
 
 var (
@@ -36,46 +29,41 @@ var (
 	NodePoolGVK = schema.GroupVersionKind{Group: "hypershift.openshift.io", Version: apiVersion, Kind: "NodePool"}
 )
 
-// InfraEnv is the pool: one node type in one zone.
 type InfraEnv struct {
 	Name        string
 	Namespace   string
 	Annotations map[string]string
-	Deleting    bool // metadata.deletionTimestamp is set
-	EarlyBound  bool // spec.clusterRef is set: hosts are bound at once, never held as spares
+	Deleting    bool
+	EarlyBound  bool
 }
 
-// Selector is the part of a NodePool agentLabelSelector herzi cares about.
 type Selector struct {
 	MatchLabels    map[string]string
-	HasExpressions bool // matchExpressions is non-empty (unsupported)
+	HasExpressions bool
 }
 
-// NodePool is the demand side.
 type NodePool struct {
 	Name         string
 	Namespace    string
-	PlatformType string // spec.platform.type; only "Agent" is ours
-	Replicas     *int32 // spec.replicas; nil when unset (e.g. autoscaling)
-	AutoScaling  bool   // spec.autoScaling is set
+	PlatformType string
+	Replicas     *int32
+	AutoScaling  bool
 	Selector     Selector
-	Paused       bool // spec.pausedUntil is "true" or an RFC 3339 time in the future (evaluated at parse time "now")
+	Paused       bool
 	Deleting     bool
 }
 
-// Agent is one machine that registered with assisted-service.
 type Agent struct {
 	Name            string
 	Namespace       string
 	Labels          map[string]string
-	Approved        bool // spec.approved
-	Bound           bool // spec.clusterDeploymentName is set
+	Approved        bool
+	Bound           bool
 	State           string
-	Connected       bool // condition Connected == True
+	Connected       bool
 	Deleting        bool
 	CreatedAt       time.Time
-	LastStateChange time.Time // newest status.conditions[].lastTransitionTime, else CreatedAt
+	LastStateChange time.Time // Newest condition transition, or CreatedAt when absent.
 }
 
-// InfraEnvName is the pool an Agent claims to belong to ("" when unlabeled).
 func (a Agent) InfraEnvName() string { return a.Labels[LabelInfraEnv] }

@@ -7,7 +7,6 @@ import (
 	"github.com/team-redbull/herzi/internal/config"
 )
 
-// Hold reasons are stable strings for callers reporting a decision.
 const (
 	HoldTargetOutOfRange = "target out of range"
 	HoldAtOrAboveTarget  = "at or above target"
@@ -15,8 +14,7 @@ const (
 	HoldProbeWait        = "probe wait"
 )
 
-// Decide implements design Part 2, "Stage 3 — Decide (pure)":
-// "running ALWAYS subtracted" and "PROOF ... STARTED AFTER the last ... failure".
+// Decide requires the caller to gate execution on Validate before applying the returned intent.
 func Decide(f PoolFacts, p config.PoolConfig, now time.Time) Intent {
 	_, target, ok := Target(f.Demand, p)
 	total, supplyOK := supply(f)
@@ -62,8 +60,7 @@ func hasPostFailureRun(runs []SlotRun, failure time.Time) bool {
 	return false
 }
 
-// Target implements the add-only target buffer with checked integer half-up rounding.
-// Invalid inputs or any unrepresentable intermediate return zero values and false.
+// Target uses integer half-up rounding; invalid inputs or overflow return zero values and false.
 func Target(demand int, p config.PoolConfig) (buffer, target int, ok bool) {
 	if demand < 0 || p.HighPct < 0 || p.MinFree < 0 {
 		return 0, 0, false

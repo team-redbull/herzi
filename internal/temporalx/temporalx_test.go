@@ -265,7 +265,6 @@ func TestCancellationJoinsWorkers(t *testing.T) {
 	assert.Zero(t, active.Load(), "all RPC workers must have exited before Sweep returns")
 	assert.EqualValues(t, 4, calls.Load(), "unstarted slots must not be dispatched")
 	assert.ErrorIs(t, s.Sweep(ctx, "pool").Err, context.Canceled)
-	// A canceled sweep is not reused on a subsequent reconcile.
 	f.describe = nil
 	assert.NoError(t, s.Sweep(context.Background(), "pool").Err)
 }
@@ -377,7 +376,6 @@ func TestFailureLRUAndRunID(t *testing.T) {
 		assert.Equal(t, tc.calls, historyCalls, "step %d", i)
 	}
 	assert.Len(t, s.failures.entries, 2)
-	// Exercise replacing an existing LRU entry without increasing its size.
 	s.failures.put(runKey{ids.PoolSlot("", "pool", 1), "r2"}, "updated")
 	value, ok := s.failures.get(runKey{ids.PoolSlot("", "pool", 1), "r2"})
 	assert.True(t, ok)
@@ -494,7 +492,6 @@ func TestSweepCacheTTLAndCopies(t *testing.T) {
 	assert.NoError(t, r.Err)
 	assert.EqualValues(t, 2, calls.Load())
 	assert.Equal(t, 2, observations)
-	// A different pool has an independent cache.
 	s.Sweep(context.Background(), "other")
 	assert.EqualValues(t, 3, calls.Load())
 }

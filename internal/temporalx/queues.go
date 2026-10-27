@@ -10,19 +10,13 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 )
 
-// Queues implements Part 1 case 11: "The pool is blocked, not ordered, when
-// no worker polls" any of the three queues. Pollers linger about five minutes
-// after a worker dies, so detecting zero pollers is delayed.
 type Queues struct{ opts Options }
 
 var _ pipeline.QueueChecker = (*Queues)(nil)
 
-// NewQueues constructs a checker. Queue names are supplied by controller wiring:
-// server-lifecycle-activity-<mce>, install-server-workflow, segment-lifecycle-activity.
 func NewQueues(o Options) *Queues { return &Queues{opts: o.defaults()} }
 
-// Pollers uses plain DescribeTaskQueue, without requesting task reachability.
-// Errors mean unknown; successful counts from the other queues are preserved.
+// Pollers preserves successful queue counts on error; errors mean unknown, never zero.
 func (q *Queues) Pollers(ctx context.Context) pipeline.PollerStatus {
 	var result pipeline.PollerStatus
 	for _, queue := range []struct {

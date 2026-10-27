@@ -16,9 +16,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 )
 
-// Sweeper implements Part 2 "Growth protocol": "describe ... <1..maxSlots>"
-// and "Any other error = the pool is BLOCKED this pass". It is safe for
-// concurrent use. Calls for the same pool share an in-flight sweep.
+// Sweeper is concurrency-safe; calls for the same pool share an in-flight sweep.
 type Sweeper struct {
 	opts     Options
 	mu       sync.Mutex
@@ -35,7 +33,6 @@ type poolSweep struct {
 
 var _ pipeline.RunSweeper = (*Sweeper)(nil)
 
-// NewSweeper constructs a sweeper with a bounded failure cache.
 func NewSweeper(o Options) *Sweeper {
 	o = o.defaults()
 	return &Sweeper{opts: o, pools: make(map[pipeline.PoolKey]*poolSweep), failures: failureLRU{
@@ -43,8 +40,7 @@ func NewSweeper(o Options) *Sweeper {
 	}}
 }
 
-// Sweep describes the latest execution of each fixed slot ID, without visibility
-// lists. Returned slices are copies so callers cannot mutate cached results.
+// Sweep returns copies of cached slices; callers may mutate them.
 func (s *Sweeper) Sweep(ctx context.Context, pool pipeline.PoolKey) pipeline.SweepResult {
 	if err := ctx.Err(); err != nil {
 		return pipeline.SweepResult{Err: err}
@@ -110,7 +106,7 @@ func (s *Sweeper) sweep(ctx context.Context, pool pipeline.PoolKey) pipeline.Swe
 			}
 		})
 	}
-	workers.Wait() // No detached RPC goroutines: every worker exits before return.
+	workers.Wait()
 	result := pipeline.SweepResult{Err: errors.Join(errs...)}
 	if err := ctx.Err(); err != nil {
 		result.Err = errors.Join(result.Err, err)
@@ -176,13 +172,9 @@ func runStatus(status enumspb.WorkflowExecutionStatus) (string, error) {
 	}
 }
 
-// failureType implements Part 3 C: "Describe does not return the failure".
-// The iterator is lazy, so the deadline must cover HasNext and Next too.
-// SweepResult has no warning field; history errors leave the type unknown and
-// are retried after the pool TTL rather than cached as a permanent result.
+// The history iterator is lazy, so the deadline must cover HasNext and Next too.
 func (s *Sweeper) failureType(ctx context.Context, key runKey) string {
-	// Never read an unpinned latest run after describing a failed run: the slot
-	// could already have been reused by the route.
+	// Pin history to the described run: the route may already have reused the slot.
 	if key.run == "" {
 		return pipeline.FailUnknown
 	}
@@ -261,14 +253,12 @@ func (c *failureLRU) put(key runKey, value string) {
 	}
 }
 
-// Invalidate makes every subsequent caller obtain a new observation.
 func (s *Sweeper) Invalidate(pool pipeline.PoolKey) {
 	s.mu.Lock()
 	delete(s.pools, pool)
 	s.mu.Unlock()
 }
 
-// SweepWithState adds acquisition proof only for pools with capacity or unknown evidence.
 func (s *Sweeper) SweepWithState(ctx context.Context, pool pipeline.PoolKey,
 	state pipeline.State, p config.PoolConfig) pipeline.SweepResult {
 	result := s.Sweep(ctx, pool)
@@ -301,7 +291,6 @@ func (s *Sweeper) acquired(ctx context.Context, key runKey) bool {
 		return false
 	}
 	scheduled := make(map[int64]bool)
-	// Bound both history size and elapsed time, including non-cooperative test iterators.
 	for n := 0; n < 100000 && callCtx.Err() == nil && iter.HasNext(); n++ {
 		e, err := iter.Next()
 		if err != nil {

@@ -23,9 +23,7 @@ import (
 
 var skipNameValidation = true
 
-// deleteAfterSpec removes the objects a spec created. It is registered BEFORE the manager starts, so
-// (cleanups run last-in first-out) the objects go only after the manager has stopped, and no later
-// spec sees them.
+// Register before manager startup: LIFO cleanup must stop the manager before deleting objects.
 func deleteAfterSpec(objects ...*unstructured.Unstructured) {
 	DeferCleanup(func() {
 		for _, o := range objects {
@@ -34,16 +32,12 @@ func deleteAfterSpec(objects ...*unstructured.Unstructured) {
 	})
 }
 
-// requestCount is the number of install requests received so far.
 func (i *installFake) requestCount() int {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return len(i.requests)
 }
 
-// This spec proves, against a real kube-apiserver, the riskiest persistence path of the design:
-// after an UNCLEAR install outcome the pool is blocked by an annotation written with a merge patch,
-// the patch touches nothing else on the InfraEnv, and the very next reconcile does not order again.
 var _ = Describe("Block after an unclear install", func() {
 	It("writes only the annotation and stops further orders", func() {
 		if os.Getenv("KUBEBUILDER_ASSETS") == "" {
@@ -55,14 +49,13 @@ var _ = Describe("Block after an unclear install", func() {
 		}
 		deleteAfterSpec(infra("q"), node("workers-q", "q", 0))
 		initial := testConfig()
-		initial.Interval = 10 * time.Minute // must stay <= probeInterval or the pool is config_invalid
+		initial.Interval = 10 * time.Minute
 		initial.AmbiguousWait = time.Hour
 		store := config.NewStore(initial)
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 			Cache:   CacheOptions("inventory"),
 			Client:  client.Options{Cache: &client.CacheOptions{Unstructured: true}},
 			Metrics: metricsserver.Options{BindAddress: "0"}, HealthProbeBindAddress: "0",
-			// A second manager in the same test process: allow the controller name to repeat.
 			Controller: ctrlconfig.Controller{SkipNameValidation: &skipNameValidation},
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -72,7 +65,7 @@ var _ = Describe("Block after an unclear install", func() {
 		}
 		r, err := New(Options{
 			Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Config: store,
-			Sweeper:   &sweepFake{now: time.Now}, // stamps each observation like the real sweeper
+			Sweeper:   &sweepFake{now: time.Now},
 			Queues:    &queuesFake{result: pipeline.PollerStatus{Activity: 1, Workflow: 1, Segment: 1}},
 			Installer: installer, Metrics: metrics.New(prometheus.NewRegistry()),
 		})
@@ -84,11 +77,10 @@ var _ = Describe("Block after an unclear install", func() {
 		DeferCleanup(func() { stop(); Eventually(done).Should(Receive(BeNil())) })
 		Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
 
-		// A pool with a deficit, an unrelated annotation and spec content that must survive the patch.
 		ie := infra("q")
 		ie.SetAnnotations(map[string]string{"keep.example/me": "yes"})
 		Expect(unstructured.SetNestedField(ie.Object, "kept", "spec", "pullSecretRef", "name")).To(Succeed())
-		// The demand must be in the cache BEFORE the pool exists, or the first reconcile sees none.
+		// Cache demand before creating the pool, or its first reconcile sees no demand.
 		workers := node("workers-q", "q", 3)
 		Expect(k8sClient.Create(ctx, workers)).To(Succeed())
 		Eventually(func() error {
@@ -96,10 +88,8 @@ var _ = Describe("Block after an unclear install", func() {
 		}, 10*time.Second, 50*time.Millisecond).Should(Succeed())
 		Expect(k8sClient.Create(ctx, ie)).To(Succeed())
 
-		// First reconcile orders once; the outcome is unclear.
 		Eventually(installer.notify, 10*time.Second).Should(Receive(Equal(pipeline.InstallRequest{Key: "q", Count: 5})))
 
-		// The annotation lands on the real object, in the future, and nothing else changed.
 		var blockedUntil time.Time
 		Eventually(func() error {
 			got := infra("q")
@@ -123,7 +113,6 @@ var _ = Describe("Block after an unclear install", func() {
 		Expect(blockedUntil).To(BeTemporally(">", time.Now().Add(30*time.Minute)),
 			"a one hour wait must be written as a future time")
 
-		// More events for the same pool must not order again while the block stands.
 		np := node("workers-q", "q", 3)
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(np), np)).To(Succeed())
 		Expect(unstructured.SetNestedField(np.Object, int64(9), "spec", "replicas")).To(Succeed())
@@ -131,7 +120,6 @@ var _ = Describe("Block after an unclear install", func() {
 		Consistently(installer.notify, 2*time.Second, 100*time.Millisecond).ShouldNot(Receive())
 		Expect(installer.requestCount()).To(Equal(1))
 
-		// A stale annotation does not block: move it to the past and the pool orders again.
 		past := infra("q")
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(past), past)).To(Succeed())
 		annotations := past.GetAnnotations()

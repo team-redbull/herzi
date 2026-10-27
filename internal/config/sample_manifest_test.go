@@ -10,10 +10,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// The sample that ships in the Helm chart must always load through the real strict loader,
-// otherwise `make deploy` would produce a pod that rejects its own configuration.
 func TestShippedSampleLoads(t *testing.T) {
-	data, err := chartConfig("ci/example-values.yaml")
+	data, err := chartConfig("hack/chart/example-values.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +33,6 @@ func TestShippedSampleLoads(t *testing.T) {
 	}
 }
 
-// The three queue names must equal the workflows repo's (shared/consts.py), or every pool is blocked.
 func TestQueueNamesDefaultToTheWorkflowsRepoNames(t *testing.T) {
 	cfg, err := config.Load([]byte("hubName: example\ninstallURL: https://w.example/x\ntemporalAddress: t:7233\n"))
 	if err != nil {
@@ -53,7 +50,7 @@ func TestQueueNamesDefaultToTheWorkflowsRepoNames(t *testing.T) {
 }
 
 func TestTheShippedSampleUsesTheRealQueueNames(t *testing.T) {
-	data, err := chartConfig("ci/example-values.yaml")
+	data, err := chartConfig("hack/chart/example-values.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,14 +63,12 @@ func TestTheShippedSampleUsesTheRealQueueNames(t *testing.T) {
 	}
 }
 
-// The owner's default buffer is 10% with a floor of two machines. This pins it, and pins that the shipped sample
-// states the same defaults, so the documented numbers cannot drift from the code unnoticed.
 func TestDefaultBufferIsTenPercentWithAFloorOfTwo(t *testing.T) {
 	defaults := config.Defaults()
 	if defaults.HighPct != 10 || defaults.MinFree != 2 {
 		t.Fatalf("defaults are highPct %d minFree %d, want 10 and 2", defaults.HighPct, defaults.MinFree)
 	}
-	data, err := chartConfig("ci/example-values.yaml")
+	data, err := chartConfig("hack/chart/example-values.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +81,8 @@ func TestDefaultBufferIsTenPercentWithAFloorOfTwo(t *testing.T) {
 	}
 }
 
-// chartConfig extracts the exact controller document from a chart values file.
 func chartConfig(name string) ([]byte, error) {
-	data, err := os.ReadFile("../../charts/herzi/" + name)
+	data, err := os.ReadFile("../../" + name)
 	if err != nil {
 		return nil, err
 	}
@@ -101,9 +95,8 @@ func chartConfig(name string) ([]byte, error) {
 	return yaml.Marshal(values.Config)
 }
 
-// Pin every explicitly shipped default, including fields which Load would otherwise fill in silently.
 func TestChartDefaultsMatchCode(t *testing.T) {
-	data, err := chartConfig("values.yaml")
+	data, err := chartConfig("charts/herzi/values.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

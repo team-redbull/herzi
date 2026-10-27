@@ -6,9 +6,7 @@ import (
 	"sync/atomic"
 )
 
-// Store implements Part 3, Edge cases: "a bad update is rejected" and Part 2's
-// invariant: "One frozen config ... per reconcile". Construct it with NewStore.
-// Store must not be copied after first use.
+// Store must be constructed with NewStore and must not be copied after first use.
 type Store struct {
 	current  atomic.Pointer[Config]
 	valid    atomic.Bool
@@ -17,9 +15,7 @@ type Store struct {
 	hasData  bool
 }
 
-// NewStore installs a config produced by Load (including pool-local semantic errors).
-// It owns a copy of the initial map and pointers, so later caller edits are isolated.
-// Valid starts true, before any Update attempt has failed.
+// NewStore requires a config from Load and owns a copy of its pool map and override pointers.
 func NewStore(initial Config) *Store {
 	s := &Store{}
 	initial.Pools = clonePools(initial.Pools)
@@ -28,17 +24,13 @@ func NewStore(initial Config) *Store {
 	return s
 }
 
-// Snapshot returns a cheap, atomic snapshot for a complete reconcile pass.
-// Treat its Pools map and override pointers as immutable; use ForPool for value copies.
-// Old snapshots remain valid after Update publishes a new config.
+// Snapshot shares immutable pool maps and override pointers; old snapshots survive updates.
 func (s *Store) Snapshot() Config { return *s.current.Load() }
 
-// Valid reports whether the last Update succeeded (true initially).
+// Valid reports whether the last Update succeeded, or true before the first attempt.
 func (s *Store) Valid() bool { return s.valid.Load() }
 
-// Update publishes a document-valid config, retaining pool-local semantic errors.
-// Document, hub and default errors keep the previous snapshot.
-// Concurrent updates are serialized, including the unchanged-bytes success path.
+// Update retains the previous snapshot on document, hub or default errors; pool errors are published.
 func (s *Store) Update(data []byte) error {
 	s.updates.Lock()
 	defer s.updates.Unlock()

@@ -8,10 +8,7 @@ import (
 	"github.com/team-redbull/herzi/internal/kube"
 )
 
-// Attribute implements design Part 2, "Stage 1 — Attribute (pure)":
-// "Open = Running slots; Closed = closed slots" and pool-scoped demand attribution.
-//
-//nolint:gocyclo // a flat list of the design's attribution rules; each rule has its own test
+//nolint:gocyclo // attribution rules stay flat so each rule can be tested independently
 func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 	facts := make(map[PoolKey]PoolFacts, len(raw.InfraEnvs))
 	warnings := slices.Clone(raw.Warnings)
@@ -87,8 +84,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 		}
 		facts[key] = f
 	}
-	// ASSUMPTION: the contract has no hub-level return value, so every pool carries
-	// the same hub warnings. Consumers should deduplicate warnings when reporting a hub.
+
 	slices.SortFunc(warnings, func(a, b Warning) int {
 		return cmp.Or(cmp.Compare(a.Object, b.Object), cmp.Compare(a.Msg, b.Msg))
 	})

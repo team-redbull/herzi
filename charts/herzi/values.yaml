@@ -1,98 +1,66 @@
-# Required installer-selected container registry/repository; no portable default.
 image:
   repository: ""
   tag: "" # Empty selects Chart.appVersion.
   pullPolicy: IfNotPresent
-replicaCount: 1
-nameOverride: ""
-fullnameOverride: ""
-goMemLimit: 400MiB # Approximately 80% of the default memory limit.
+goMemLimit: 400MiB # About 80% of the default memory limit.
 resources:
   requests: {cpu: 100m, memory: 128Mi}
   limits: {cpu: "1", memory: 512Mi}
 serviceAccount:
   create: true
-  name: "" # Generated fullname when created; default otherwise.
+  name: "" # Release name when created; default otherwise.
   annotations: {}
 rbac:
   create: true
   metricsReader:
-    subjects: [] # Optional Kubernetes RBAC subjects allowed to GET /metrics.
-# This mapping is the exact controller config file, without chart-specific keys.
+    subjects: [] # Subjects allowed to GET /metrics.
 config:
-  interval: 120s # Normal reconcile period; live reload.
-  reconcileTimeout: 60s # Overall reconcile deadline; live reload.
-  hubName: "" # REQUIRED canonical MCE hub name; startup-bound.
-  agentNamespace: inventory # Agent/InfraEnv namespace; startup-bound.
-  installURL: "" # REQUIRED absolute http(s) install-server route; startup-bound.
-  maxSlots: 100 # Fixed API route slot count; must equal 100.
+  interval: 120s # Reconcile period; live reload.
+  reconcileTimeout: 60s # Reconcile deadline; live reload.
+  hubName: "" # Required MCE hub name.
+  agentNamespace: inventory # Agent/InfraEnv namespace.
+  installURL: "" # Required absolute HTTP(S) install endpoint.
+  maxSlots: 100 # Fixed at 100 API slots.
   ambiguousWait: 5m # Block after an unclear POST; live reload.
-  stuckAfter: 2h # Startup-bound open-run warning age, exported as a metric.
-  temporalAddress: "" # REQUIRED Temporal host:port; startup-bound.
-  temporalNamespace: default # Temporal namespace; startup-bound.
-  activityQueue: "" # Empty derives server-lifecycle-activity-<canonical hubName>; startup-bound.
-  workflowQueue: install-server-workflow # Workflow worker queue; startup-bound.
-  segmentQueue: segment-lifecycle-activity # Segment worker queue; startup-bound.
+  stuckAfter: 2h # Open-run warning age; startup-bound.
+  temporalAddress: "" # Required Temporal host:port.
+  temporalNamespace: default # Temporal namespace.
+  activityQueue: "" # Empty derives server-lifecycle-activity-<canonical hubName>.
+  workflowQueue: install-server-workflow # Workflow worker queue.
+  segmentQueue: segment-lifecycle-activity # Segment worker queue.
   defaults:
-    highPct: 10 # Target spare buffer percentage, integer half-up rounding (0..1000).
+    highPct: 10 # Spare percentage (0..1000), half-up rounding.
     minFree: 2 # Minimum spare buffer (0..100000).
     maxOpenRunsPerPool: 15 # Maximum concurrent pool runs (1..100).
     probeInterval: 20m # Hardware shortage probe period.
     drawGrace: 2m # Wait for acquisition evidence; less than probeInterval.
     failureMemory: 6h # Remember failures; at least twice probeInterval.
-    settlingMax: 60m # Maximum unbound Agent settling age; at least probeInterval.
+    settlingMax: 60m # Unbound Agent age; at least probeInterval.
     dryRunGrow: false # Record intended orders without calling install-server.
     paused: false # Suspend growth for this pool.
-  pools: {} # InfraEnv-name -> any defaults overrides; presence opts in; live reload.
-# Secrets are provisioned externally. Never put credentials in values.
+  pools: {} # InfraEnv name to overrides; presence opts in.
 temporal:
   tls:
     existingSecret: ""
     caKey: ca.crt
-  mtls:
-    enabled: false # Requires temporal.tls.existingSecret with all three keys.
-    certKey: tls.crt
-    keyKey: tls.key
-  apiKey:
-    existingSecret: ""
-    key: api-key
-installApi:
-  bearerToken:
-    existingSecret: ""
-    key: token
 metrics:
-  enabled: true # Render the HTTPS metrics Service.
+  enabled: true # HTTPS metrics Service.
   port: 8443
-  tls:
-    existingSecret: "" # tls.crt/tls.key; otherwise controller-runtime self-signs.
 serviceMonitor:
-  enabled: false # Requires Prometheus Operator CRDs installed separately.
+  enabled: false # Requires Prometheus Operator CRDs.
   interval: 30s
-  scrapeTimeout: 10s
   labels: {}
-  tlsConfig:
-    insecureSkipVerify: false
-    # serverName: herzi-metrics.herzi-system.svc
-    # ca: {secret: {name: herzi-metrics-tls, key: ca.crt}}
-  bearerTokenSecret: {} # {name: herzi-prometheus-token, key: token}
+  endpoint: {} # Raw ServiceMonitor endpoint fields.
 prometheusRule:
-  enabled: false # Requires Prometheus Operator CRDs installed separately.
+  enabled: false # Requires Prometheus Operator CRDs.
   labels: {}
-networkPolicy:
-  enabled: false # Set actual destination IPs before enabling; check CNI DNAT behavior.
-  dns: kubernetes # kubernetes: kube-system:53; openshift: openshift-dns:5353.
-  metricsNamespaceSelector:
-    matchLabels: {metrics: enabled}
-  apiServer: {cidrs: [], ports: [443, 6443]}
-  temporal: {cidrs: [], ports: [7233]}
-  installApi: {cidrs: [], ports: [443]}
 nodeSelector: {}
 tolerations: []
 affinity: {}
-topologySpreadConstraints: []
-priorityClassName: ""
 podAnnotations: {}
 podLabels: {}
 imagePullSecrets: []
 extraArgs: []
 extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []

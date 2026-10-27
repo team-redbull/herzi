@@ -220,7 +220,6 @@ func TestExternalDeadlinesAndCancellation(t *testing.T) {
 			require.Contains(t, calls, stage)
 		})
 	}
-	// A cooperative cancellation during the sweep prevents further external calls.
 	f := setup(t, testConfig(), infra("p"))
 	ctx, cancel := context.WithCancel(context.Background())
 	f.r.Sweeper = sweepFunc(func(context.Context, pipeline.PoolKey) pipeline.SweepResult { cancel(); return pipeline.SweepResult{} })
@@ -275,8 +274,6 @@ func TestSafeChangeOnlyLogging(t *testing.T) {
 		require.Zero(t, len(entry.values)%2)
 		require.NotContains(t, fmt.Sprint(entry), "secret")
 	}
-	// Return text is also logged by controller-runtime, so retain causes via
-	// Unwrap instead of rendering arbitrary external strings in Error().
 	f = setup(t, testConfig(), infra("p"))
 	f.install.err = errors.New("https://user:secret@example.invalid")
 	_, err = f.r.Reconcile(ctx, req)
@@ -299,7 +296,6 @@ func TestClosedReloadChannel(t *testing.T) {
 	require.False(t, quit)
 	queue.Done(req)
 	require.Equal(t, client.ObjectKeyFromObject(infra("p")), req.NamespacedName)
-	// Closing the source cannot generate zero-value events or repeat the reload.
 	require.Never(t, func() bool { return queue.Len() > 0 }, 20*time.Millisecond, time.Millisecond)
 }
 
@@ -313,7 +309,6 @@ func TestWatchBurstCannotSpendAgainstCachedSweep(t *testing.T) {
 	f.sweep.result.Slots = []pipeline.SlotRun{{Slot: 1, Status: pipeline.StatusRunning, Started: f.now}, {Slot: 2, Status: pipeline.StatusRunning, Started: f.now}}
 	f.reconcile(t, "p")
 	require.Len(t, f.install.requests, 1)
-	// A later fresh sweep can prove a short order left real unmet demand.
 	f.sweep.result.Slots = f.sweep.result.Slots[:1]
 	f.reconcile(t, "p")
 	require.Len(t, f.install.requests, 2)

@@ -11,8 +11,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// durationText preserves the YAML scalar type so numbers cannot silently become strings.
-// Parsing is deferred so errors include the complete hub/default/pool field path.
 type durationText struct {
 	value    string
 	isString bool
@@ -53,8 +51,7 @@ type configInput struct {
 	Pools             map[string]poolInput `yaml:"pools"`
 }
 
-// Load implements Part 2, Config: "An unknown key under a pool is an error".
-// It validates the document, hub and defaults; merged pool errors remain available through PoolErrors.
+// Load rejects document, hub and default errors; merged pool errors remain available via PoolErrors.
 func Load(data []byte) (Config, error) {
 	if err := removedPoolKeys(data); err != nil {
 		return Config{}, err

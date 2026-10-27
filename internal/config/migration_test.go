@@ -52,7 +52,7 @@ func TestRemovedKeyEffectiveDocument(t *testing.T) {
 	for _, data := range []string{
 		"pools: {p: &old {<<: *old, lowPct: 0}}", "defaults: &cycle {loop: *cycle}",
 	} {
-		require.Error(t, removedPoolKeys([]byte(data))) // yaml.v3 rejects cycles before inspection.
+		require.Error(t, removedPoolKeys([]byte(data)))
 	}
 	for _, data := range []string{
 		"pools: {lowPct: {}, minBand: {}}",

@@ -1,5 +1,4 @@
-// Package controller implements design Part 2, "Reconcile" and "Growth protocol":
-// "last check before spending" and "do not retry the same request".
+// Package controller reconciles spare-machine pools against NodePool demand.
 package controller
 
 import (
@@ -24,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Options supplies all I/O ports. Reader must bypass the informer cache.
+// Options.Reader must bypass the informer cache for pre-order checks.
 type Options struct {
 	Client    client.Client
 	Reader    client.Reader
@@ -43,8 +42,6 @@ type pollerEntry struct {
 	status pipeline.PollerStatus
 }
 
-// Reconciler keeps only disposable log-deduplication and hub poller cache state.
-// Safety across restarts comes from Temporal and the InfraEnv block annotation.
 type Reconciler struct {
 	Options
 	cfg      *config.Store
@@ -67,7 +64,6 @@ func isNil(v any) bool {
 	return false
 }
 
-// New validates all required ports, including typed nil interface values.
 func New(o Options) (*Reconciler, error) {
 	for _, p := range []struct {
 		name  string
@@ -105,14 +101,12 @@ func New(o Options) (*Reconciler, error) {
 		nil
 }
 
-// NeedLeaderElection documents the controller's default leader-only execution.
 func (r *Reconciler) NeedLeaderElection() bool { return true }
 
 // +kubebuilder:rbac:groups=agent-install.openshift.io,resources=infraenvs;agents,verbs=get;list;watch
 // +kubebuilder:rbac:groups=agent-install.openshift.io,resources=infraenvs,verbs=get;patch
 // +kubebuilder:rbac:groups=hypershift.openshift.io,resources=nodepools,verbs=get;list;watch
 
-// Reconcile implements design Part 2: "one frozen config for the whole pass".
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, retErr error) {
 	started := time.Now()
 	defer func() {
@@ -129,8 +123,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	var wakeUntil time.Time
 	defer func() {
 		if retErr == nil && wakeUntil.After(now) {
-			// Account for API latency without reading the decision clock again.
-			// The queue delay starts at return, not at the beginning of the pass.
+			// Queue delay starts at return; subtract API latency without rereading the decision clock.
 			remaining := wakeUntil.Sub(now) - time.Since(started)
 			result.RequeueAfter = min(cfg.Interval, max(time.Nanosecond, remaining))
 		}
@@ -154,7 +147,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	if err != nil {
 		return result, err
 	}
-	// The explicit Get is authoritative even if the list raced with creation/deletion.
+	// The explicit Get remains authoritative if the list raced with creation or deletion.
 	replaceInfraEnv(&raw, ie)
 	key := pipeline.PoolKey(req.Name)
 	sweepStarted := time.Now()
@@ -323,8 +316,6 @@ func (r *Reconciler) recordOutcome(ctx context.Context,
 	return nil
 }
 
-// snapshot freezes startup-bound settings as well as the live configuration for
-// one pass. Reloading identity cannot redirect watches or an existing installer.
 func (r *Reconciler) snapshot() config.Config {
 	cfg := r.cfg.Snapshot()
 	live := cfg.HubConfig
@@ -343,16 +334,12 @@ func blockedUntil(now time.Time, wait time.Duration) time.Time {
 	return until
 }
 
-// Error text is safe for controller-runtime to log, while callers can still use
-// errors.Is/As to inspect the wrapped cause. External error strings may contain
-// credentials or arbitrary HTTP response bodies.
+// External errors may contain credentials; expose safe text while preserving errors.Is/As.
 type reconcileError struct{ cause error }
 
 func (e *reconcileError) Error() string { return "reconcile failed" }
 func (e *reconcileError) Unwrap() error { return e.cause }
 
-// sweepWindow schedules a retry for ports that return stale observations.
-// Eligibility itself depends solely on ObservedAt, never on elapsed wall time.
 const sweepWindow = 10 * time.Second
 
 func (r *Reconciler) freshSweep(pool string, observed time.Time) bool {
@@ -483,6 +470,7 @@ func (r *Reconciler) grow(ctx context.Context, req ctrl.Request, cfg config.Conf
 			f.State.ProbeNotBefore = attemptAt.Add(pc.ProbeInterval)
 			annotations[kube.AnnotationState] = pipeline.EncodeState(f.State)
 		}
+		// Persist the block before POST so cancellation or restart cannot erase an uncertain order.
 		if err := r.patchAnnotations(ctx, req.NamespacedName, annotations); err != nil {
 			return result, wakeUntil, exists, err
 		}

@@ -1,5 +1,4 @@
-// Package installer implements Part 2, Growth protocol: "do not retry the same
-// request" and "timeout / connection error / 5xx: ambiguous".
+// Package installer sends additive install requests without automatic retries.
 package installer
 
 import (
@@ -20,7 +19,7 @@ import (
 
 const maxBody = 1 << 20
 
-// Options configures one install-server endpoint. URL is the complete route URL.
+// Options.URL must be the complete install route URL.
 type Options struct {
 	URL, MCECluster, Namespace string
 	HTTPClient                 *http.Client
@@ -28,7 +27,6 @@ type Options struct {
 	BearerToken                string
 }
 
-// Installer sends each additive POST once, retaining per-slot partial reports.
 type Installer struct {
 	options   Options
 	client    *http.Client
@@ -37,8 +35,7 @@ type Installer struct {
 
 var _ pipeline.Installer = (*Installer)(nil)
 
-// New validates configuration and copies the supplied client to prevent redirect
-// handling from replaying an additive POST or forwarding its credentials.
+// New copies the supplied HTTP client and disables redirects to prevent POST replay or credential forwarding.
 func New(o Options) (*Installer, error) {
 	u, err := url.Parse(o.URL)
 	if err != nil || u == nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Fragment != "" {
@@ -53,7 +50,6 @@ func New(o Options) (*Installer, error) {
 	if o.Timeout < 0 {
 		return nil, errors.New("timeout must not be negative")
 	}
-	// ASSUMPTION: An omitted timeout uses 30 seconds, below the default reconcile deadline.
 	if o.Timeout == 0 {
 		o.Timeout = 30 * time.Second
 	}
@@ -62,7 +58,6 @@ func New(o Options) (*Installer, error) {
 		client = *o.HTTPClient
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	// ASSUMPTION: Builds without a module release version identify themselves as herzi/dev.
 	version := "dev"
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
 		version = info.Main.Version
@@ -77,8 +72,7 @@ type requestBody struct {
 	Count      int    `json:"count"`
 }
 
-// Install implements the design's Growth protocol: "failed items are NOT assumed
-// absent ... the next sweep decides". No response causes an automatic retry.
+// Install never retries; ErrAmbiguous means machines may have started and requires a fresh sweep.
 func (i *Installer) Install(ctx context.Context, req pipeline.InstallRequest) (pipeline.InstallResult, error) {
 	result := pipeline.InstallResult{Requested: req.Count}
 	if req.Count < 1 || req.Count > pipeline.APIMaxCount {
@@ -102,14 +96,13 @@ func (i *Installer) Install(ctx context.Context, req pipeline.InstallRequest) (p
 	}
 	response, err := i.client.Do(request)
 	if err != nil {
-		// Transport errors can contain URLs or arbitrary transport text; only expose
-		// the classification and context sentinel, never credentials from that text.
+		// Transport errors may contain credentials; expose only classification and context sentinels.
 		if ctx.Err() != nil {
 			return result, fmt.Errorf("%w: %w", pipeline.ErrAmbiguous, ctx.Err())
 		}
 		return result, fmt.Errorf("%w: HTTP transport failed", pipeline.ErrAmbiguous)
 	}
-	defer func() { _ = response.Body.Close() }() // a close error after the body was read changes nothing
+	defer func() { _ = response.Body.Close() }()
 	result.HTTPCode = response.StatusCode
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, maxBody+1))
 	if response.StatusCode >= 400 && response.StatusCode < 500 {
@@ -122,7 +115,7 @@ func (i *Installer) Install(ctx context.Context, req pipeline.InstallRequest) (p
 		}
 		return result, fmt.Errorf("%w: HTTP %d: %s", pipeline.ErrRejected, response.StatusCode, detail)
 	}
-	// Decode all complete items before reporting malformed/truncated replies.
+	// Preserve complete slot reports even when the remaining reply is malformed or truncated.
 	parseErr := parseReport(data, &result)
 	if readErr != nil || len(data) > maxBody {
 		return result, fmt.Errorf("%w: response could not be read within 1 MiB", pipeline.ErrAmbiguous)
@@ -172,8 +165,6 @@ func parseReport(data []byte, result *pipeline.InstallResult) error {
 			return fmt.Errorf("expected results array")
 		}
 		for decoder.More() {
-			// Decode each complete item independently so an interrupted body preserves
-			// earlier slot reports. Unknown fields such as workflow_id are allowed.
 			var raw json.RawMessage
 			if err := decoder.Decode(&raw); err != nil {
 				return err

@@ -2,14 +2,11 @@ package config
 
 import "time"
 
-// Defaults implements Part 2, Config: "Pool settings all live under defaults".
 func Defaults() PoolConfig {
 	return PoolConfig{HighPct: 10, MinFree: 2, MaxOpenRunsPerPool: 15,
 		ProbeInterval: 20 * time.Minute, DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour}
 }
 
-// Queue names fixed by the workflows repo (shared/consts.py). They are defaults so a hub cannot ship a
-// misspelt one: a queue nobody polls reads as "zero pollers" and would block every pool.
 const (
 	DefaultWorkflowQueue        = "install-server-workflow"
 	DefaultSegmentQueue         = "segment-lifecycle-activity"
@@ -17,9 +14,6 @@ const (
 	DefaultTemporalNamespaceVal = "default"
 )
 
-// DefaultHub supplies Part 2, Config's hub-wide timing, slot and queue defaults.
-// The hub name, install URL and Temporal address must be supplied by the operator. The activity queue
-// is derived from the hub name (server-lifecycle-activity-<mce>) when it is not written.
 func DefaultHub() HubConfig {
 	return HubConfig{Interval: 2 * time.Minute, ReconcileTimeout: time.Minute, AgentNamespace: "inventory",
 		MaxSlots: 100, AmbiguousWait: 5 * time.Minute, StuckAfter: 2 * time.Hour,
@@ -27,10 +21,10 @@ func DefaultHub() HubConfig {
 		SegmentQueue: DefaultSegmentQueue}
 }
 
-// Manages implements Part 2, Config: "A pool that is not listed is not managed".
+// Manages reports whether the pool is explicitly listed in configuration.
 func (c Config) Manages(name string) bool { _, ok := c.Pools[name]; return ok }
 
-// ForPool implements Part 2, Config: "each field takes the pool's value if it is written, otherwise the default".
+// ForPool merges written pool overrides over defaults, field by field.
 func (c Config) ForPool(name string) PoolConfig { return merge(c.Defaults, c.Pools[name]) }
 
 func merge(p PoolConfig, o PoolOverride) PoolConfig {

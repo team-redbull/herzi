@@ -14,8 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// herzi keeps each InfraEnv's pool of spare machines matched to NodePool demand.
-// See docs/design/herzi-design.md.
+// Package main runs the herzi pool controller.
 package main
 
 import (
@@ -29,8 +28,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
 	"github.com/team-redbull/herzi/internal/config"
 	"github.com/team-redbull/herzi/internal/controller"
 	"github.com/team-redbull/herzi/internal/installer"
@@ -53,10 +50,8 @@ import (
 	// +kubebuilder:scaffold:imports
 )
 
-// version is set at build time: -ldflags "-X main.version=...".
 var version = "dev"
 
-// commit is set at build time: -ldflags "-X main.commit=...". It identifies the exact source of a binary.
 var commit = "none"
 
 var (
@@ -66,18 +61,12 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	// InfraEnv, NodePool and Agent are read as unstructured and need no scheme registration.
 	// +kubebuilder:scaffold:scheme
 }
 
-// leaderElectionID names the Lease. It is stable across releases on purpose.
+// Keep the Lease name stable across releases to prevent competing leaders during upgrades.
 const leaderElectionID = "herzi.redbull.io"
 
-// Environment variables for material that must not live in the ConfigMap:
-// CA_FILE is an optional PEM CA bundle; CERT_FILE and KEY_FILE are optional
-// paired mTLS PEM files. API_KEY authenticates Temporal; API_BEARER_TOKEN
-// authenticates install-server. Values are never logged. Kubernetes client-go
-// also honours KUBECONFIG and the standard in-cluster service environment.
 const (
 	envTemporalCA     = "HERZI_TEMPORAL_TLS_CA_FILE"
 	envTemporalCert   = "HERZI_TEMPORAL_TLS_CERT_FILE"
@@ -86,8 +75,6 @@ const (
 	envBearerToken    = "HERZI_API_BEARER_TOKEN"
 )
 
-// startupBoundChanged lists the hub settings that were captured when the process started (the cache
-// namespace, the Temporal client, the sweeper, the installer). A reload cannot apply them.
 func startupBoundChanged(old, current config.HubConfig) []string {
 	var changed []string
 	add := func(name string, different bool) {
@@ -108,10 +95,10 @@ func startupBoundChanged(old, current config.HubConfig) []string {
 	return changed
 }
 
-// nolint:gocyclo
+// nolint:gocyclo // Entry point delegates lifecycle management to run.
 func main() { os.Exit(run(os.Args[1:])) }
 
-// run owns resource cleanup. Only main calls os.Exit, after run's defers finish.
+// Only main calls os.Exit, so run's deferred cleanup completes first.
 func run(args []string) int {
 	o, err := parseLaunchOptions(args)
 	if err != nil {
@@ -125,7 +112,6 @@ func run(args []string) int {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&o.log)))
 
-	// Without a valid configuration there is nothing safe to do: fail fast and loudly.
 	raw, err := os.ReadFile(o.configPath)
 	if err != nil {
 		setupLog.Error(err, "Could not read the configuration file", "path", o.configPath)
@@ -148,8 +134,6 @@ func run(args []string) int {
 		return 1
 	}
 
-	// Temporal: a lazy client, so the pod starts and serves probes even while Temporal is down. An
-	// unreachable Temporal then shows up as a sweep or poller error, which blocks the affected pools.
 	tc, err := temporalx.Dial(temporalx.DialOptions{
 		Address:   hub.TemporalAddress,
 		Namespace: hub.TemporalNamespace,
@@ -170,7 +154,7 @@ func run(args []string) int {
 
 	sweeper := temporalx.NewSweeper(temporalx.Options{
 		Client: tc, MCE: hub.HubName, MaxSlots: hub.MaxSlots,
-		CacheTTL: 10 * time.Second, // Matches the controller spending throttle.
+		CacheTTL: 10 * time.Second,
 	})
 	queues := temporalx.NewQueues(temporalx.Options{
 		Client:        tc,
@@ -185,7 +169,6 @@ func run(args []string) int {
 		return 1
 	}
 
-	// A config change re-enqueues every pool. The channel holds at most one pending signal.
 	reload := make(chan event.GenericEvent, 1)
 	watcher := &config.FileWatcher{
 		Path: o.configPath, Store: store,
@@ -228,8 +211,6 @@ func run(args []string) int {
 	return 0
 }
 
-// managerOptions keeps identity/cache/leadership wiring reviewable without
-// binding sockets. No graceful drain is allowed after a lost lease.
 func managerOptions(
 	hub config.HubConfig, metricsOptions metricsserver.Options, probeAddr string, leader bool,
 ) ctrl.Options {
@@ -237,19 +218,16 @@ func managerOptions(
 	return ctrl.Options{
 		Scheme: scheme, Metrics: metricsOptions, HealthProbeBindAddress: probeAddr,
 		LeaderElection: leader, LeaderElectionID: leaderElectionID,
+		// Releasing the lease is safe because main exits as soon as the manager stops.
 		LeaderElectionReleaseOnCancel: true, GracefulShutdownTimeout: &shutdown,
 		Client: client.Options{Cache: &client.CacheOptions{Unstructured: true}},
 		Cache:  controller.CacheOptions(hub.AgentNamespace),
 	}
 }
 
-// installTimeout must stay positive even for the smallest valid duration; zero
-// would activate the installer's unrelated 30s default. The parent ctx is also a
-// hard upper bound, including live changes to ReconcileTimeout.
+// Keep the timeout positive; zero would activate the installer's unrelated 30s default.
 func installTimeout(timeout time.Duration) time.Duration { return max(time.Nanosecond, timeout/2) }
 
-// reloadHandler sends accepted changes only and reports a restart requirement
-// once per changed field set, rather than repeating it on unrelated pool edits.
 func reloadHandler(
 	hub config.HubConfig, store *config.Store, m *metrics.Metrics,
 	reload chan<- event.GenericEvent, logger logr.Logger, path string,
@@ -261,7 +239,7 @@ func reloadHandler(
 		defer mu.Unlock()
 		if err != nil {
 			m.SetConfigValid(false)
-			// Config decoder errors may include arbitrary YAML scalar values.
+			// Config decoder errors may expose credentials in arbitrary YAML scalar values.
 			diagnostic := errors.New("invalid configuration")
 			if migration, ok := errors.AsType[*config.RemovedKeyError](err); ok {
 				diagnostic = migration
@@ -313,18 +291,13 @@ func parseLaunchOptions(args []string) (launchOptions, error) {
 	flags.BoolVar(&o.showVersion, "version", false, "Print the version and exit.")
 	o.log = zap.Options{Development: false}
 	o.log.BindFlags(flags)
-	clientconfig.RegisterFlags(flags) // Retain the documented controller-runtime --kubeconfig flag.
+	clientconfig.RegisterFlags(flags)
 	return o, flags.Parse(args)
 }
 
 func metricsOptions(o launchOptions) metricsserver.Options {
 	var tlsOpts []func(*tls.Config)
-	// if the enable-http2 flag is false (the default), http/2 should be disabled
-	// due to its vulnerabilities. More specifically, disabling http/2 will
-	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
-	// Rapid Reset CVEs. For more information see:
-	// - https://github.com/advisories/GHSA-qppj-fm5r-hxr3
-	// - https://github.com/advisories/GHSA-4374-p667-p6c8
+	// Disable HTTP/2 by default to avoid Stream Cancellation and Rapid Reset attacks.
 	disableHTTP2 := func(c *tls.Config) {
 		c.NextProtos = []string{"http/1.1"}
 	}
@@ -338,7 +311,6 @@ func metricsOptions(o launchOptions) metricsserver.Options {
 		TLSOpts:       tlsOpts,
 	}
 	if o.secureMetrics {
-		// Only authorised users and service accounts may read the metrics (see config/rbac).
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 	if len(o.metricsCertPath) > 0 {

@@ -9,14 +9,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// reader keeps the first malformed field error, including its full path. Missing
-// fields have zero values; Kubernetes admission validates required field presence.
 type reader struct {
 	object map[string]any
 	err    error
 }
 
-// replicasPath is the field path of a NodePool's desired size.
 var replicasPath = []string{"spec", "replicas"}
 
 func newReader(u *unstructured.Unstructured) *reader {
@@ -105,15 +102,12 @@ func (r *reader) reference(path ...string) bool {
 }
 func (r *reader) deleting() bool { return !r.timestamp("metadata", "deletionTimestamp").IsZero() }
 
-// ParseInfraEnv implements Part 2, Validate: "InfraEnv deleting, or spec.clusterRef set (early-bound)".
 func ParseInfraEnv(u *unstructured.Unstructured) (InfraEnv, error) {
 	r := newReader(u)
 	v := InfraEnv{Name: r.str("metadata", "name"), Namespace: r.str("metadata", "namespace"), Annotations: r.stringMap("metadata", "annotations"), Deleting: r.deleting(), EarlyBound: r.reference("spec", "clusterRef")}
 	return v, r.err
 }
 
-// ParseNodePool implements Part 2, Attribute: "pausedUntil: \"true\" or RFC3339"
-// and "no replicas (autoscaling?)". Absent replicas stay nil.
 func ParseNodePool(u *unstructured.Unstructured, now time.Time) (NodePool, error) {
 	r := newReader(u)
 	v := NodePool{Name: r.str("metadata", "name"), Namespace: r.str("metadata", "namespace"), PlatformType: r.str("spec", "platform", "type"), Deleting: r.deleting()}
@@ -155,8 +149,6 @@ func ParseNodePool(u *unstructured.Unstructured, now time.Time) (NodePool, error
 	return v, r.err
 }
 
-// ParseAgent implements Part 1's supply terms and Part 2, Attribute:
-// "settling ... measured from its last state change" (including stale labels).
 func ParseAgent(u *unstructured.Unstructured) (Agent, error) {
 	r := newReader(u)
 	v := Agent{Name: r.str("metadata", "name"), Namespace: r.str("metadata", "namespace"), Labels: r.stringMap("metadata", "labels"), Approved: r.boolean("spec", "approved"), Bound: r.reference("spec", "clusterDeploymentName"), State: r.str("status", "debugInfo", "state"), Deleting: r.deleting(), CreatedAt: r.timestamp("metadata", "creationTimestamp")}

@@ -22,8 +22,6 @@ groups:
       description: Non-capacity failures require investigation; the metric catalogue
         has no failure-type label, so inspect workflow history.
       runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#install-failing
-  # Every other alert compares a herzi series, and a crashed or never-started controller has none, so
-  # it would stay silent exactly when it matters. absent() is the only expression that fires then.
   - alert: HerziControllerDown
     expr: absent(herzi_config_valid)
     for: 10m
@@ -34,7 +32,6 @@ groups:
       description: The controller is not running, is crash-looping (check RBAC and its log), or Prometheus
         cannot scrape it. Nothing is keeping any pool filled while this fires.
       runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#controller-down
-  # A pool that is paused on purpose (annotation or config) or waiting out its own block is not an incident.
   - alert: HerziPoolBlocked
     expr: herzi_pool_blocked{reason!~"paused|blocked_until"} == 1
     for: 15m

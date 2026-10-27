@@ -506,8 +506,7 @@ func assertHighPctTarget(t *testing.T, assigned, claimable int) {
 		}
 		objects = append(objects, a)
 	}
-	// The percentage path is exercised with an EXPLICIT 30%: with the 10% default the minFree floor of 2
-	// decides the buffer up to demand 24, so demand 20 would not show the percentage at all.
+	// Use 30% because the default 10% leaves demand 20 under the minFree floor.
 	cfg := testConfig()
 	cfg.Defaults.HighPct = 30
 	f := setup(t, cfg, objects...)
@@ -519,8 +518,6 @@ func assertHighPctTarget(t *testing.T, assigned, claimable int) {
 	require.Equal(t, float64(claimable), metric(t, f.reg, "herzi_pool_claimable", nil))
 }
 
-// The shipped default is highPct 10 with a minFree floor of 2: the floor decides the buffer up to demand 24 and the
-// percentage takes over from demand 25. These are literal numbers, not computed with pipeline.Target.
 func TestDefaultBufferIsTheFloorUntilDemand25(t *testing.T) {
 	for _, tc := range []struct {
 		demand, assigned, claimable int
@@ -541,7 +538,7 @@ func TestDefaultBufferIsTheFloorUntilDemand25(t *testing.T) {
 				}
 				objects = append(objects, a)
 			}
-			f := setup(t, testConfig(), objects...) // testConfig uses config.Defaults()
+			f := setup(t, testConfig(), objects...)
 			f.reconcile(t, "p")
 			require.Equal(t, tc.wantTarget, metric(t, f.reg, "herzi_pool_target", nil))
 			require.Equal(t, tc.wantNeed, metric(t, f.reg, "herzi_pool_need", nil))

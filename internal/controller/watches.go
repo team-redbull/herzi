@@ -19,12 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-// CacheOptions implements design Part 2 "Cache". The manager MUST also use
-// client.Options{Cache: &client.CacheOptions{Unstructured: true}}; otherwise
-// unstructured client reads bypass these informers. Agents have no label filter,
-// so unlabeled objects remain visible for hub warnings.
-// ASSUMPTION: AgentNamespace is a process-level setting; changing it requires
-// rebuilding the manager cache and watches (a process restart).
+// CacheOptions requires client.CacheOptions.Unstructured=true so unstructured reads use these informers.
 func CacheOptions(agentNamespace string) cache.Options {
 	return cache.Options{ByObject: map[client.Object]cache.ByObject{
 		kube.NewUnstructured(kube.InfraEnvGVK): {Namespaces: map[string]cache.Config{agentNamespace: {}}, Transform: kube.PartialTransform()},
@@ -85,8 +80,6 @@ func (r *Reconciler) parsedPredicate(agent bool) predicate.Predicate {
 	}}
 }
 
-// SetupWithManager implements design Part 2 "Framework": all watches use the
-// exact same InfraEnv namespace/name key and four pools may reconcile in parallel.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	namespace := r.startup.AgentNamespace
 	b := ctrl.NewControllerManagedBy(mgr).Named("herzi").

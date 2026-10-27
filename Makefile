@@ -1,4 +1,3 @@
-# Design Part 2, Framework: no CRD ownership; manifests generates RBAC only.
 SHELL := /usr/bin/env bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := build
@@ -25,7 +24,6 @@ GOVULNCHECK_VERSION ?= v1.9.0
 YEAR ?= $(shell date +%Y)
 CONFIG ?= /tmp/herzi-dev-config.yaml
 GO_PACKAGES ?= ./cmd/... ./internal/...
-# Exclude the controller's envtest suite from unit tests. No ./... across work packages.
 UNIT_PACKAGES = $$(go list ./internal/... | sed '\|/internal/controller\(/\|$$\)|d')
 INTEGRATION_PACKAGES ?= ./internal/controller/...
 
@@ -33,17 +31,17 @@ INTEGRATION_PACKAGES ?= ./internal/controller/...
 all: build
 help: ## Display targets.
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-manifests: controller-gen ## Generate chart manager RBAC from controller markers.
-	./hack/gen-rbac.sh
-generate: controller-gen ## Generate DeepCopy methods if API objects are added.
+manifests: controller-gen ## Generate manager RBAC.
+	CONTROLLER_GEN="$(CONTROLLER_GEN)" ./hack/gen-rbac.sh
+generate: controller-gen ## Generate DeepCopy methods.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./internal/..."
 fmt: ## Format Go sources.
 	go fmt $(GO_PACKAGES)
 vet: ## Vet Go sources.
 	go vet $(GO_PACKAGES)
-test: ## Unit tests with race detection and coverage (no envtest).
+test: ## Run unit race tests.
 	go test -race -covermode=atomic -coverprofile=cover.out $(UNIT_PACKAGES)
-test-integration: setup-envtest ## Run WP6 envtest suite; see test/e2e/README.md for CRD path gate.
+test-integration: setup-envtest ## Run envtest suite.
 	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use -i $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -race -count=1 -covermode=atomic -coverprofile=cover-integration.out $(INTEGRATION_PACKAGES)
 lint: golangci-lint ## Run standard golangci-lint.
 	"$(GOLANGCI_LINT)" run $(GO_PACKAGES)
@@ -68,22 +66,22 @@ PLATFORMS ?= linux/amd64,linux/arm64
 docker-buildx: ## Build and push multi-platform images using buildx.
 	$(CONTAINER_TOOL) buildx build --platform="$(PLATFORMS)" --build-arg VERSION="$(VERSION)" --build-arg COMMIT="$(COMMIT)" --push -t "$(IMG)" .
 helm-lint: ## Strict lint of all chart examples.
-	@for values in charts/herzi/ci/*-values.yaml; do "$(HELM)" lint --strict charts/herzi -f "$$values"; done
+	@for values in hack/chart/*-values.yaml; do "$(HELM)" lint --strict charts/herzi -f "$$values"; done
 helm-test: ## Assert rendered chart behavior and validation.
 	HELM="$(HELM)" ./hack/test-chart.sh
 helm-package: helm-lint ## Package the chart into bin/.
 	mkdir -p bin
 	"$(HELM)" package charts/herzi --destination bin
 
-deploy: ## Install or upgrade with explicitly selected site values and image.
+deploy: ## Deploy selected values and image.
 	@test -n "$(VALUES)" -a -n "$(IMG_REPO)" -a -n "$(IMG_TAG)" || { echo "deploy requires VALUES, IMG_REPO and IMG_TAG" >&2; exit 1; }
 	"$(HELM)" upgrade --install herzi charts/herzi -n "$(NAMESPACE)" --create-namespace -f "$(VALUES)" --set-string image.repository="$(IMG_REPO)" --set-string image.tag="$(IMG_TAG)"
-undeploy: ## Uninstall the Helm release; leave the namespace and external secrets intact.
+undeploy: ## Uninstall the release.
 	"$(HELM)" uninstall herzi -n "$(NAMESPACE)"
 test-alerts: ## Test the shipped native alert rules.
 	./hack/test-alerts.sh
-manifests-drift: manifests ## Compare generated RBAC with the committed file.
-	git diff --exit-code -- charts/herzi/files/rbac-rules.yaml
+manifests-drift: controller-gen ## Check generated RBAC drift.
+	CONTROLLER_GEN="$(CONTROLLER_GEN)" ./hack/gen-rbac.sh --check
 
 $(LOCALBIN):
 	mkdir -p "$(LOCALBIN)"

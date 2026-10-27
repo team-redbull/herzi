@@ -6,15 +6,13 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// NewUnstructured creates a watch object carrying the external resource's GVK.
 func NewUnstructured(gvk schema.GroupVersionKind) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(gvk)
 	return u
 }
 
-// PartialTransform implements Part 2, Cache: "strip managedFields and inventory
-// with a DefaultTransform" while retaining the complete parsed views.
+// PartialTransform strips cache-heavy fields in place while preserving fields needed by parsers.
 func PartialTransform() cache.TransformFunc {
 	return func(obj any) (any, error) {
 		u, ok := obj.(*unstructured.Unstructured)

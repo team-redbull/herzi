@@ -2,7 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "herzi.fullname" . }}-metrics-auth
+  name: {{ .Release.Name }}-metrics-auth
   labels:
     {{- include "herzi.labels" . | nindent 4 }}
 rules:
@@ -16,13 +16,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "herzi.fullname" . }}-metrics-auth
+  name: {{ .Release.Name }}-metrics-auth
   labels:
     {{- include "herzi.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "herzi.fullname" . }}-metrics-auth
+  name: {{ .Release.Name }}-metrics-auth
 subjects:
   - kind: ServiceAccount
     name: {{ include "herzi.serviceAccount" . }}
@@ -31,7 +31,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "herzi.fullname" . }}-metrics-reader
+  name: {{ .Release.Name }}-metrics-reader
   labels:
     {{- include "herzi.labels" . | nindent 4 }}
 rules:
@@ -42,13 +42,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "herzi.fullname" $ }}-metrics-reader
+  name: {{ $.Release.Name }}-metrics-reader
   labels:
     {{- include "herzi.labels" $ | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "herzi.fullname" $ }}-metrics-reader
+  name: {{ $.Release.Name }}-metrics-reader
 subjects: {{ toYaml . | nindent 2 }}
 {{- end }}
 {{- end }}

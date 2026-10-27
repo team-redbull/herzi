@@ -14,8 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// gather implements design Part 2's cached snapshot and uncached "Recheck".
-// Malformed objects block only their identifiable pool; unattributable objects warn.
 func (r *Reconciler) gather(ctx context.Context,
 	reader client.Reader,
 	cfg config.Config,

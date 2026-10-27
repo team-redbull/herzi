@@ -2,7 +2,7 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "herzi.fullname" . }}
+  name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- toYaml (merge (include "herzi.labels" . | fromYaml) .Values.serviceMonitor.labels) | nindent 4 }}
@@ -11,13 +11,5 @@ spec:
     matchLabels:
       {{- include "herzi.selectorLabels" . | nindent 6 }}
   endpoints:
-    - path: /metrics
-      port: https
-      scheme: https
-      interval: {{ .Values.serviceMonitor.interval }}
-      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
-      tlsConfig: {{ toYaml .Values.serviceMonitor.tlsConfig | nindent 8 }}
-      {{- with .Values.serviceMonitor.bearerTokenSecret }}
-      bearerTokenSecret: {{ toYaml . | nindent 8 }}
-      {{- end }}
+    - {{- toYaml (mergeOverwrite (dict "path" "/metrics" "port" "https" "scheme" "https" "interval" .Values.serviceMonitor.interval) .Values.serviceMonitor.endpoint) | nindent 6 }}
 {{- end }}

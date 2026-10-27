@@ -10,7 +10,6 @@ import (
 	"github.com/team-redbull/herzi/internal/config"
 )
 
-// Part 3, Edge cases: "a bad update is rejected"; Part 2: one frozen snapshot per pass.
 func TestStoreLastGoodAndValid(t *testing.T) {
 	initial := validConfig(t)
 	s := config.NewStore(initial)
@@ -28,7 +27,7 @@ func TestStoreLastGoodAndValid(t *testing.T) {
 	if !old.Manages("test") || old.ForPool("test").MinFree != 5 || !s.Valid() {
 		t.Fatal("successful update not published")
 	}
-	// Syntax, strictness, and semantic failures all keep the last good value.
+
 	for _, bad := range []string{"[", minimal + "typo: true\n", minimal + "defaults: {minFree: -1}\n"} {
 		if err := s.Update([]byte(bad)); err == nil {
 			t.Fatal("bad update accepted")
@@ -49,7 +48,7 @@ func TestStoreLastGoodAndValid(t *testing.T) {
 			t.Fatal("unchanged bytes must be a no-op")
 		}
 	}
-	// Update owns its comparison bytes; caller changes cannot poison the no-op cache.
+
 	good[len(good)-4] = '9'
 	if err := s.Update(good); err != nil {
 		t.Fatal(err)

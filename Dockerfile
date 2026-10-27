@@ -1,4 +1,3 @@
-# Design Part 2, Framework: one controller binary, no owned CRD.
 FROM golang:1.27.3 AS builder
 ARG TARGETOS=linux
 ARG TARGETARCH

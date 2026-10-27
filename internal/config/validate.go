@@ -9,9 +9,7 @@ import (
 	"time"
 )
 
-// Validate implements Part 2, Config: "Validation, after the merge, per pool".
-// It reports all hub, default, and merged-pool problems in one joined error.
-// Canonicalization belongs to Load; a manually constructed Config must already be canonical.
+// Validate joins hub, default and merged-pool errors; Config must already be canonical.
 func (c Config) Validate() error {
 	problems := make([]error, 0, 1+len(c.Pools))
 	problems = append(problems, c.validateDocument())
@@ -81,8 +79,7 @@ func (c Config) validateDocument() error {
 	return errors.Join(problems...)
 }
 
-// PoolErrors exposes Part 2, Config's rule: "A pool that fails validation is blocked with the reason named".
-// Only listed pools appear, and only when their merged settings fail validation.
+// PoolErrors returns errors only for listed pools whose merged settings are invalid.
 func (c Config) PoolErrors() map[string]error {
 	problems := make(map[string]error)
 	for name := range c.Pools {

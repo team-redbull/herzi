@@ -15,17 +15,8 @@
         "pullPolicy": {
           "type": "string"
         }
-      }
-    },
-    "replicaCount": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "nameOverride": {
-      "type": "string"
-    },
-    "fullnameOverride": {
-      "type": "string"
+      },
+      "additionalProperties": false
     },
     "goMemLimit": {
       "type": "string"
@@ -70,7 +61,8 @@
           "type": "object",
           "properties": {}
         }
-      }
+      },
+      "additionalProperties": false
     },
     "rbac": {
       "type": "object",
@@ -84,9 +76,11 @@
             "subjects": {
               "type": "array"
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "config": {
       "type": "object",
@@ -302,50 +296,11 @@
             "caKey": {
               "type": "string"
             }
-          }
-        },
-        "mtls": {
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "certKey": {
-              "type": "string"
-            },
-            "keyKey": {
-              "type": "string"
-            }
-          }
-        },
-        "apiKey": {
-          "type": "object",
-          "properties": {
-            "existingSecret": {
-              "type": "string"
-            },
-            "key": {
-              "type": "string"
-            }
-          }
+          },
+          "additionalProperties": false
         }
-      }
-    },
-    "installApi": {
-      "type": "object",
-      "properties": {
-        "bearerToken": {
-          "type": "object",
-          "properties": {
-            "existingSecret": {
-              "type": "string"
-            },
-            "key": {
-              "type": "string"
-            }
-          }
-        }
-      }
+      },
+      "additionalProperties": false
     },
     "metrics": {
       "type": "object",
@@ -357,16 +312,9 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 65535
-        },
-        "tls": {
-          "type": "object",
-          "properties": {
-            "existingSecret": {
-              "type": "string"
-            }
-          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "serviceMonitor": {
       "type": "object",
@@ -377,26 +325,15 @@
         "interval": {
           "type": "string"
         },
-        "scrapeTimeout": {
-          "type": "string"
-        },
         "labels": {
           "type": "object",
           "properties": {}
         },
-        "tlsConfig": {
-          "type": "object",
-          "properties": {
-            "insecureSkipVerify": {
-              "type": "boolean"
-            }
-          }
-        },
-        "bearerTokenSecret": {
-          "type": "object",
-          "properties": {}
+        "endpoint": {
+          "type": "object"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "prometheusRule": {
       "type": "object",
@@ -408,68 +345,8 @@
           "type": "object",
           "properties": {}
         }
-      }
-    },
-    "networkPolicy": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "dns": {
-          "type": "string",
-          "enum": [
-            "openshift",
-            "kubernetes"
-          ]
-        },
-        "metricsNamespaceSelector": {
-          "type": "object",
-          "properties": {
-            "matchLabels": {
-              "type": "object",
-              "properties": {
-                "metrics": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        },
-        "apiServer": {
-          "type": "object",
-          "properties": {
-            "cidrs": {
-              "type": "array"
-            },
-            "ports": {
-              "type": "array"
-            }
-          }
-        },
-        "temporal": {
-          "type": "object",
-          "properties": {
-            "cidrs": {
-              "type": "array"
-            },
-            "ports": {
-              "type": "array"
-            }
-          }
-        },
-        "installApi": {
-          "type": "object",
-          "properties": {
-            "cidrs": {
-              "type": "array"
-            },
-            "ports": {
-              "type": "array"
-            }
-          }
-        }
-      }
+      },
+      "additionalProperties": false
     },
     "nodeSelector": {
       "type": "object",
@@ -481,12 +358,6 @@
     "affinity": {
       "type": "object",
       "properties": {}
-    },
-    "topologySpreadConstraints": {
-      "type": "array"
-    },
-    "priorityClassName": {
-      "type": "string"
     },
     "podAnnotations": {
       "type": "object",
@@ -504,41 +375,14 @@
     },
     "extraEnv": {
       "type": "array"
+    },
+    "extraVolumes": {
+      "type": "array"
+    },
+    "extraVolumeMounts": {
+      "type": "array"
     }
   },
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "temporal": {
-            "properties": {
-              "mtls": {
-                "properties": {
-                  "enabled": {
-                    "const": true
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "temporal": {
-            "properties": {
-              "tls": {
-                "properties": {
-                  "existingSecret": {
-                    "minLength": 1
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  ]
+  "additionalProperties": false
 }

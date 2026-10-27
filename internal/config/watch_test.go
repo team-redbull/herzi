@@ -23,11 +23,11 @@ func TestFileWatcherAppliesAndRejects(t *testing.T) {
 	var calls []error
 	w := &FileWatcher{Path: path, Store: store, OnUpdate: func(err error) { calls = append(calls, err) }}
 
-	w.Poll() // first read of identical content still reports once, and is accepted
+	w.Poll()
 	if len(calls) != 1 || calls[0] != nil || !store.Valid() {
 		t.Fatalf("first poll: calls=%v valid=%v", calls, store.Valid())
 	}
-	w.Poll() // unchanged => silent
+	w.Poll()
 	if len(calls) != 1 {
 		t.Fatalf("an unchanged file must not call OnUpdate again: %v", calls)
 	}

@@ -1,4 +1,4 @@
 herzi is installed in {{ .Release.Namespace }}.
 The chart does not create a Namespace. Use --namespace herzi-system --create-namespace when installing.
-Inspect the rollout: kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "herzi.fullname" . }}
+Inspect the rollout: kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ .Release.Name }}
 Start every pool with dryRunGrow: true. Example endpoints must be replaced before deployment.

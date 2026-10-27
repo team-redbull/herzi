@@ -43,7 +43,6 @@ func requireError(t *testing.T, err error, contains ...string) {
 	}
 }
 
-// Part 2, Config: strict keys, string durations, defaults, and opt-in membership.
 func TestLoad(t *testing.T) {
 	tests := []struct{ name, data, problem string }{
 		{"minimal", minimal, ""},
@@ -180,7 +179,6 @@ func TestGoldenSample(t *testing.T) {
 }
 
 func TestMergeEveryField(t *testing.T) {
-	// Override every field with a different value, including explicit zero and false.
 	c, err := config.Load([]byte(minimal + `defaults:
   dryRunGrow: true
   paused: true
@@ -217,7 +215,6 @@ pools:
 	}
 }
 
-// Part 2, Config: test every pool rule against defaults and merged named pools.
 func TestValidatePoolRules(t *testing.T) {
 	tests := []struct {
 		field     string
@@ -270,13 +267,13 @@ func TestValidatePoolRules(t *testing.T) {
 			})
 		}
 	}
-	// The configured slot limit must equal the route's fixed slot range.
+
 	c := validConfig(t)
 	c.MaxSlots = 14
 	requireError(t, c.Validate(), "maxOpenRunsPerPool")
 	c.Defaults.MaxOpenRunsPerPool = 14
 	requireError(t, c.Validate(), "maxSlots", "exactly 100")
-	// The route limit still applies when the hub config itself is invalid.
+
 	c.MaxSlots = 200
 	c.Defaults.MaxOpenRunsPerPool = 101
 	requireError(t, c.Validate(), "maxSlots", "maxOpenRunsPerPool")

@@ -267,8 +267,7 @@ func TestOptions(t *testing.T) {
 	}
 }
 
-// In-memory listeners keep httptest's real HTTP/TLS server and client semantics
-// available in sandboxes that prohibit binding TCP sockets.
+// In-memory listeners preserve HTTP/TLS semantics without binding TCP sockets.
 type pipeListener struct {
 	connections chan net.Conn
 	done        chan struct{}

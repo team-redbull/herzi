@@ -160,7 +160,7 @@ func TestMalformedFields(t *testing.T) {
 			}
 		})
 	}
-	// Mistyped intermediate containers must also report a path.
+
 	u := &unstructured.Unstructured{Object: map[string]any{"metadata": false, "spec": false, "status": false}}
 	for _, err := range parseAll(u) {
 		if err == nil || !strings.Contains(err.Error(), "metadata.name") {
@@ -198,8 +198,7 @@ func TestParserBoundaries(t *testing.T) {
 			t.Fatal(n, err)
 		}
 	}
-	// Newest transition wins regardless of condition order or connection status,
-	// even when the newest transition is older than creation time.
+
 	for _, conditions := range [][]any{
 		{map[string]any{"type": "Connected", "status": "False", "lastTransitionTime": "2026-10-25T08:00:00Z"}, map[string]any{"type": "Other", "status": "True", "lastTransitionTime": "2026-10-25T09:00:00Z"}},
 		{map[string]any{"lastTransitionTime": "2026-10-25T09:00:00Z"}, map[string]any{"lastTransitionTime": "2026-10-25T08:00:00Z"}},
@@ -256,8 +255,6 @@ func TestTransform(t *testing.T) {
 }
 
 func TestNonJSONMistypedFieldsDoNotPanic(t *testing.T) {
-	// NestedMap/NestedSlice deep-copy their contents and panic on non-JSON Go
-	// values. Parsers inspect nested containers without invoking that copy.
 	cases := []struct {
 		object map[string]any
 		parser int

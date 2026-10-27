@@ -60,8 +60,7 @@ func TestBlockedPoolsNeverOrderProperty(t *testing.T) {
 		if !v.Blocked || len(v.Reasons) == 0 {
 			t.Fatal("unsafe pool passed Validate")
 		}
-		// The controller contract gates Decide/Plan on Validate; pure Decide alone
-		// intentionally has no validation responsibility.
+
 		var orders []InstallRequest
 		if !v.Blocked {
 			if g, ok := Decide(f, poolConfig(), raw.At).(Grow); ok {

@@ -38,8 +38,46 @@ config:
 temporal:
   tls:
     existingSecret: herzi-temporal-tls
-  mtls:
-    enabled: true
-metrics:
-  tls:
-    existingSecret: herzi-metrics-tls
+serviceMonitor:
+  enabled: true
+  labels:
+    release: prometheus
+  endpoint:
+    scrapeTimeout: 10s
+    tlsConfig:
+      serverName: herzi-metrics.herzi-system.svc
+      ca:
+        secret:
+          name: herzi-metrics-tls
+          key: ca.crt
+    authorization:
+      credentials:
+        name: herzi-prometheus-token
+        key: token
+prometheusRule:
+  enabled: true
+  labels:
+    release: prometheus
+rbac:
+  metricsReader:
+    subjects:
+    - kind: ServiceAccount
+      name: prometheus
+      namespace: monitoring
+extraArgs:
+- --metrics-cert-path=/etc/herzi-metrics
+extraEnv:
+- name: HERZI_API_BEARER_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: herzi-api
+      key: token
+extraVolumes:
+- name: metrics-certificate
+  secret:
+    secretName: herzi-metrics-tls
+    defaultMode: 292
+extraVolumeMounts:
+- name: metrics-certificate
+  mountPath: /etc/herzi-metrics
+  readOnly: true

@@ -154,7 +154,7 @@ func TestAttributeSlotsAndDeterminism(t *testing.T) {
 	for range 10 {
 		equal(t, Attribute(raw, settings{poolConfig()}), all)
 	}
-	// Slice inputs are never sorted or changed in place.
+
 	equal(t, raw.Sweep["a"].Slots[0].Slot, 9)
 	raw.NodePools[0], raw.NodePools[1] = raw.NodePools[1], raw.NodePools[0]
 	raw.Agents[0], raw.Agents[1] = raw.Agents[1], raw.Agents[0]
@@ -163,9 +163,6 @@ func TestAttributeSlotsAndDeterminism(t *testing.T) {
 	}
 }
 
-// These exercise the pure portion of the Part 2 invariants. Temporal Describe,
-// the id/Python contract, HTTP acknowledgements and controller config snapshots
-// belong to other work packages; here the supplied snapshot is authoritative.
 func TestSnapshotSafetyInvariants(t *testing.T) {
 	t.Run("unclear POST annotation survives reconstruction and expires at boundary", func(t *testing.T) {
 		raw := snapshot()
@@ -175,7 +172,7 @@ func TestSnapshotSafetyInvariants(t *testing.T) {
 			equal(t, Validate(facts["a"], raw, poolConfig()).Blocked, true)
 		}
 		raw.At = raw.At.Add(5 * time.Minute)
-		// Three latest runs exist even if the caller lost the order acknowledgement.
+
 		raw.Sweep["a"] = SweepResult{Slots: []SlotRun{running(1), running(1), running(1)}}
 		facts := Attribute(raw, settings{poolConfig()})
 		equal(t, Validate(facts["a"], raw, poolConfig()).Blocked, false)

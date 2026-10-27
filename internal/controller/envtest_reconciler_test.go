@@ -23,10 +23,6 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
-// world models what the real ports report: an accepted order shows up as open runs in every later
-// sweep, exactly as the real sweeper sees the Temporal runs the route just started. A fake that kept
-// reporting "no open runs" would make the controller (correctly) order the same machines again as soon
-// as a fresh observation arrived.
 type world struct {
 	mu     sync.Mutex
 	open   []pipeline.SlotRun
@@ -64,8 +60,6 @@ func (w *world) sweepCount() int {
 	return w.sweeps
 }
 
-// setInfraEnvAnnotations rewrites the InfraEnv's annotations from a FRESH read, retrying on conflict:
-// the controller patches the same object (marker, state), so a stale copy would be refused.
 func setInfraEnvAnnotations(pool string, annotations map[string]string) {
 	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		ie := infra(pool)
@@ -88,8 +82,8 @@ var _ = Describe("Inventory watches", func() {
 		}
 		deleteAfterSpec(agent("one", "p"), agent("two", "p"), infra("p"), node("workers", "p", 0))
 		initial := testConfig()
-		initial.Defaults.HighPct = 30       // explicit: with the 10% default the floor of 2 would decide every step below
-		initial.Interval = 10 * time.Minute // must stay <= probeInterval or the pool is config_invalid
+		initial.Defaults.HighPct = 30 // Use 30% so the percentage exceeds the spare floor.
+		initial.Interval = 10 * time.Minute
 		store := config.NewStore(initial)
 		reload := make(chan event.GenericEvent, 10)
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
@@ -113,7 +107,6 @@ var _ = Describe("Inventory watches", func() {
 		DeferCleanup(func() { stop(); Eventually(done).Should(Receive(BeNil())) })
 		Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
 
-		// Two claimable Agents, demand 4: target 4 + max(minFree 2, 30% of 4) = 6, supply 2, so 4 are missing.
 		for _, a := range []*unstructured.Unstructured{agent("one", "p"), agent("two", "p")} {
 			status := a.Object["status"]
 			Expect(k8sClient.Create(ctx, a)).To(Succeed())
@@ -126,8 +119,6 @@ var _ = Describe("Inventory watches", func() {
 		Expect(k8sClient.Create(ctx, infra("p"))).To(Succeed())
 		Eventually(w.notify, 10*time.Second).Should(Receive(Equal(pipeline.InstallRequest{Key: "p", Count: 4})))
 
-		// Pause is persisted on the InfraEnv. Replicas 4 -> 7 makes target 9 against supply 2 + 4 open = 6
-		// (3 missing), but a paused pool must not order.
 		setInfraEnvAnnotations("p", map[string]string{kube.AnnotationPaused: "true"})
 		Eventually(func() string {
 			u := infra("p")
@@ -145,23 +136,19 @@ var _ = Describe("Inventory watches", func() {
 		Expect(k8sClient.Update(ctx, np)).To(Succeed())
 		Consistently(w.notify, 1500*time.Millisecond, 100*time.Millisecond).ShouldNot(Receive())
 
-		// Unpause: exactly the 3 missing machines are ordered, driven by the NodePool/InfraEnv watch.
 		setInfraEnvAnnotations("p", nil)
 		Eventually(w.notify, 10*time.Second).Should(Receive(Equal(pipeline.InstallRequest{Key: "p", Count: 3})))
 
-		// Replicas 7 -> 8: target 8 + max(2, 30% of 8 = 2) = 10 against supply 2 + 4 + 3 = 9, so 1 is missing.
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(np), np)).To(Succeed())
 		Expect(unstructured.SetNestedField(np.Object, int64(8), "spec", "replicas")).To(Succeed())
 		Expect(k8sClient.Update(ctx, np)).To(Succeed())
 		Eventually(w.notify, 10*time.Second).Should(Receive(Equal(pipeline.InstallRequest{Key: "p", Count: 1})))
 
-		// Replicas 8 -> 10: target 13 against supply 10 orders three through the watch.
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(np), np)).To(Succeed())
 		Expect(unstructured.SetNestedField(np.Object, int64(10), "spec", "replicas")).To(Succeed())
 		Expect(k8sClient.Update(ctx, np)).To(Succeed())
 		Eventually(w.notify, 10*time.Second).Should(Receive(Equal(pipeline.InstallRequest{Key: "p", Count: 3})))
 
-		// The pool is now exactly at target, so a config reload re-enqueues it (one more sweep) and orders nothing.
 		before := w.sweepCount()
 		reload <- event.GenericEvent{Object: infra("p")}
 		Eventually(w.sweepCount, 10*time.Second).Should(BeNumerically(">", before))
