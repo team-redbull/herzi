@@ -87,7 +87,7 @@ internal/installer/            HTTP client of the install-server route          
 internal/temporalx/            slot sweep (Describe), failure types, queue pollers         (WP4)
 internal/metrics/              Prometheus metrics (names below)                           (controller WP)
 internal/controller/           reconciler, watches/mapping, annotations, recheck          (controller WP)
-config/, Dockerfile, Makefile, .github/, docs/ops, test/crds                              (WP5)
+charts/herzi/, Dockerfile, Makefile, .github/, docs/ops, test/crds                              (WP5)
 ```
 
 ## Work packages and FILE OWNERSHIP
@@ -101,7 +101,7 @@ packages: `internal/pipeline/{types,ports,errors,stages}.go`, `internal/kube/typ
 | WP2 config | `internal/config/*.go` except `types.go`; `internal/config/testdata/` | `Defaults()`, `Load([]byte)` strict YAML with duration strings and unknown-key rejection, `(Config).ForPool/Manages/Validate`, `Store` (atomic last-good snapshot), tests |
 | WP3 kube + installer | `internal/kube/*.go` except `types.go`; `internal/kube/testdata/`; `internal/installer/` | parsers `ParseInfraEnv/ParseNodePool/ParseAgent` from `*unstructured.Unstructured`; the HTTP `Installer` with error classification; tests |
 | WP4 temporalx | `internal/temporalx/` | `Sweeper` (RunSweeper) and `Queues` (QueueChecker) over `go.temporal.io/sdk/client`; tests with the SDK mocks |
-| WP5 ops | `config/`, `Dockerfile`, `Makefile`, `.github/`, `.golangci.yml`, `docs/ops/`, `test/crds/`, `README.md` | kustomize manifests, hardened Deployment, RBAC, ConfigMap sample, alerts, CI, container build, envtest CRD stubs, runbook |
+| WP5 ops | `charts/herzi/`, `Dockerfile`, `Makefile`, `.github/`, `.golangci.yml`, `docs/ops/`, `test/crds/`, `README.md` | Helm chart, hardened Deployment, RBAC, ConfigMap sample, alerts, CI, container build, envtest CRD stubs, runbook |
 | WP6 controller (phase 2) | `cmd/`, `internal/controller/`, `internal/metrics/` | wiring, reconciler, mapping funcs, recheck, annotations, metrics, envtest suite |
 
 ## Rules for every agent
@@ -151,7 +151,7 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 - envtest suite covers: pool grows, probe mode, blocked pool, paused pool, unmanaged pool, lease/restart behaviour of the block annotation.
 - Container is distroless, non-root, read-only root filesystem, seccomp RuntimeDefault, all capabilities dropped.
 - Metrics, probes, RBAC minimal (get/list/watch on the three kinds, get/update/patch on InfraEnv metadata for the block annotation, Lease), leader election with `LeaderElectionReleaseOnCancel`.
-- README, runbook and alert rules exist.
+- README, runbook and chart alert rules exist; `charts/herzi` passes `make helm-lint helm-test test-alerts manifests-drift`.
 
 ## Round 2 safety contracts
 

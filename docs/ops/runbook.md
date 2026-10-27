@@ -4,6 +4,11 @@ Implements design Part 2, “Alert by failure type (metrics, not decisions)”,
 and Part 3, orphan-bound Agents and stuck runs. Replace pool names with the
 alert's `pool` label; the namespace below assumes the shipped example.
 
+Alert rules live in [charts/herzi/files/alerts.rules.yaml](../../charts/herzi/files/alerts.rules.yaml),
+with promtool cases in `charts/herzi/tests/alerts.test.yaml`. Run `make test-alerts`;
+enable the chart resource with `prometheusRule.enabled: true` after installing
+Prometheus Operator CRDs and configuring rule discovery.
+
 ## Common confirmation commands
 
 ```bash
@@ -158,9 +163,9 @@ kubectl -n herzi-system logs deployment/herzi -c manager --previous --tail=100
 
 The usual causes, in the order to check them:
 
-1. `ContainerCreating` with a `FailedMount` event: the `herzi-config` ConfigMap (or an opted-in TLS Secret) does not exist. The default install ships no ConfigMap on purpose.
-2. `CrashLoopBackOff` with `The configuration file is invalid` in the log: the log line carries the offending key; fix the ConfigMap.
-3. `CrashLoopBackOff` after about two minutes with `Failed to run manager` and a cache-sync error: the controller is **missing RBAC** for Agents, InfraEnvs or NodePools. Check `kubectl auth can-i list agents.agent-install.openshift.io --as=system:serviceaccount:herzi-system:controller-manager -n inventory` (and the same for `infraenvs` and `nodepools`).
+1. `ContainerCreating` with a `FailedMount` event: the `herzi-config` ConfigMap (or an opted-in TLS Secret) does not exist. The chart renders `herzi-config` from values. Missing `config.hubName`, `config.installURL`, `config.temporalAddress` or `image.repository` fails `helm install` validation early; a missing ConfigMap after installation indicates deletion or an incomplete release.
+2. `CrashLoopBackOff` with `The configuration file is invalid` in the log: the log line carries the offending key; fix the site values and run `helm upgrade`.
+3. `CrashLoopBackOff` after about two minutes with `Failed to run manager` and a cache-sync error: the controller is **missing RBAC** for Agents, InfraEnvs or NodePools. Check `kubectl auth can-i list agents.agent-install.openshift.io --as=system:serviceaccount:herzi-system:herzi -n inventory` (and the same for `infraenvs` and `nodepools`).
 4. A wrong `agentNamespace`: the pod runs but sees no InfraEnvs. The metrics exist in that case, so this alert does not fire; check `herzi_pool_*` for the pools you configured.
 5. The pod is healthy but Prometheus cannot scrape it: check the ServiceMonitor, the metrics TLS CA and the `metrics-reader` binding (see operating.md, secure monitoring).
 
@@ -195,7 +200,7 @@ kubectl -n herzi-system get configmap herzi-config -o go-template='{{index .data
 kubectl -n herzi-system logs deployment/herzi -c manager --since=30m
 ```
 
-Compare the mounted ConfigMap with the intended config; fix unknown keys, duration strings and merged constraints. Reapply the ConfigMap and confirm herzi_config_valid returns to 1. Invalid supported settings in a merged pool publish with healthy changes and block only that pool (`reason="config_invalid"`); they do not reject the document. Validate `maxSlots == 100`, `1 <= maxOpenRunsPerPool <= 100`, nonnegative highPct/minFree, positive durations, `failureMemory >= 2*probeInterval`, `interval <= probeInterval`, `settlingMax >= probeInterval`, and `drawGrace < probeInterval`, including defaults and each merged pool.
+Compare the mounted ConfigMap with the intended config; fix unknown keys, duration strings and merged constraints. Upgrade the Helm release with corrected site values and confirm herzi_config_valid returns to 1. Invalid supported settings in a merged pool publish with healthy changes and block only that pool (`reason="config_invalid"`); they do not reject the document. Validate `maxSlots == 100`, `1 <= maxOpenRunsPerPool <= 100`, nonnegative highPct/minFree, positive durations, `failureMemory >= 2*probeInterval`, `interval <= probeInterval`, `settlingMax >= probeInterval`, and `drawGrace < probeInterval`, including defaults and each merged pool.
 
 For migration errors, delete `lowPct` and `minBand` from defaults and every override, including zero/null values. The diagnostics are `defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct` and `pools.<name>.minBand was removed: the controller no longer has a ceiling; delete minBand`. These obsolete keys reject the whole document. Apply the migrated configuration with the new image; rollback requires the matching old configuration. Set `highPct: 15` for the former target buffer, or use the new default 10.
 

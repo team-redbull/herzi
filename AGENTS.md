@@ -2,37 +2,28 @@
 
 ## Project Structure
 
-**Single-group layout (default):**
-```
-cmd/main.go                    Manager entry (registers controllers/webhooks)
-api/<version>/*_types.go       CRD schemas (+kubebuilder markers)
-api/<version>/zz_generated.*   Auto-generated (DO NOT EDIT)
-internal/controller/*          Reconciliation logic
-internal/webhook/*             Validation/defaulting (if present)
-charts/herzi/templates/*       Helm deployment templates
-charts/herzi/files/rbac-rules.yaml          Generated RBAC (DO NOT EDIT)
-charts/herzi/ci/*-values.yaml               Example CRs (edit these)
-Makefile                       Build/test/deploy commands
-PROJECT                        Kubebuilder metadata Auto-generated (DO NOT EDIT)
+herzi observes external Agent, InfraEnv and NodePool APIs as unstructured objects;
+it owns no CRDs or webhooks. The current layout is:
+
+```text
+cmd/main.go                         Manager entry, flags and wiring
+internal/controller/*               Reconciliation, watches and RBAC markers
+internal/config                     Controller configuration loader and live store
+internal/pipeline/*                 Pure decision stages
+charts/herzi/templates/*            Helm deployment templates
+charts/herzi/values.yaml            Deployment defaults and configuration
+charts/herzi/values.schema.json     Helm values validation
+charts/herzi/files/rbac-rules.yaml  Generated RBAC (DO NOT EDIT)
+charts/herzi/files/alerts.rules.yaml Native Prometheus rules
+charts/herzi/tests/alerts.test.yaml promtool cases
+charts/herzi/ci/*-values.yaml        Example Helm values
+hack/                              Build and verification helpers
+Makefile                           Build/test/deploy commands
+PROJECT                            Kubebuilder metadata (DO NOT EDIT manually)
 ```
 
-**Multi-group layout** (for projects with multiple API groups):
-```
-api/<group>/<version>/*_types.go       CRD schemas by group
-internal/controller/<group>/*          Controllers by group
-internal/webhook/<group>/<version>/*   Webhooks by group and version (if present)
-```
-
-Multi-group layout organizes APIs by group name (e.g., `batch`, `apps`). Check the `PROJECT` file for `multigroup: true`.
-
-**To convert to multi-group layout:**
-1. Run: `kubebuilder edit --multigroup=true`
-2. Move APIs: `mkdir -p api/<group> && mv api/<version> api/<group>/`
-3. Move controllers: `mkdir -p internal/controller/<group> && mv internal/controller/*.go internal/controller/<group>/`
-4. Move webhooks (if present): `mkdir -p internal/webhook/<group> && mv internal/webhook/<version> internal/webhook/<group>/`
-5. Update import paths in all files
-6. Fix `path` in `PROJECT` file for each resource
-7. Update test suite CRD paths (add one more `..` to relative paths)
+The API/webhook guidance below applies only if those features are added through
+the CLI in future; it does not describe current deployment requirements.
 
 ## Critical Rules
 
@@ -51,14 +42,14 @@ Do not move files around. The CLI expects files in specific locations.
 Always use `kubebuilder create api` and `kubebuilder create webhook` to scaffold. Do NOT create files manually.
 
 ### E2E Tests Require an Isolated Kind Cluster
-The e2e tests are designed to validate the solution in an isolated environment (similar to GitHub Actions CI).
+Future e2e coverage described in `test/e2e/README.md` must use an isolated environment.
 Ensure you run them against a dedicated [Kind](https://kind.sigs.k8s.io/) cluster (not your “real” dev/prod cluster).
 
 ## After Making Changes
 
 **After editing `*_types.go` or markers:**
 ```
-make manifests  # Regenerate CRDs/RBAC from markers
+make manifests  # Regenerate chart manager RBAC from markers (no owned CRDs)
 make generate   # Regenerate DeepCopy methods
 ```
 
@@ -142,11 +133,13 @@ kubebuilder create webhook \
 ## Testing & Development
 
 ```bash
-make test              # Run unit tests (uses envtest: real K8s API + etcd)
+make test              # Unit race tests; no envtest
+make test-integration  # envtest: real Kubernetes API server and etcd
+make ci                # lint, vet, test, vuln, helm-lint, helm-test, test-alerts, manifests-drift
 make run               # Run locally (uses current kubeconfig context)
 ```
 
-Tests use **Ginkgo + Gomega** (BDD style). Check `suite_test.go` for setup.
+Unit tests use standard Go testing. The controller envtest suite uses Ginkgo + Gomega; check its `suite_test.go` for setup. CI runs integration and image builds separately from `make ci`.
 
 ## Deployment Workflow
 
@@ -155,15 +148,15 @@ Tests use **Ginkgo + Gomega** (BDD style). Check `suite_test.go` for setup.
 make manifests generate
 
 # 2. Build & deploy
-export IMG=<registry>/<project>:tag
-make docker-build docker-push IMG=$IMG  # Or: kind load docker-image $IMG --name <cluster>
-make deploy VALUES=site-values.yaml IMG_REPO=<registry>/<project> IMG_TAG=tag
+export IMG=registry.example.com/herzi:0.1.0
+make docker-build docker-push IMG="$IMG" VERSION=0.1.0 COMMIT=unknown
+make deploy VALUES=site-values.yaml IMG_REPO=registry.example.com/herzi IMG_TAG=0.1.0
 
 # 3. Test
 helm template herzi charts/herzi -f charts/herzi/ci/example-values.yaml
 
 # 4. Debug
-kubectl logs -n <project>-system deployment/<project>-controller-manager -c manager -f
+kubectl logs -n herzi-system deployment/herzi -c manager -f
 ```
 
 ### API Design
@@ -251,14 +244,22 @@ Generated code includes: status conditions (`metav1.Condition`), finalizers, own
 ### Helm Chart
 
 The deployment source of truth is `charts/herzi/README.md` and `charts/herzi/values.yaml`.
+Copy the example values and replace hub identity, install endpoint, Temporal address,
+image repository and pools. Keep every pool at `dryRunGrow: true` initially. The
+chart renders the ConfigMap and validates required values before installation.
+It creates no Secrets, CRDs or Namespace templates. Helm can create the namespace;
+uninstall leaves that namespace and external Secrets intact. Pool and live timing
+edits reload without restarting the pod; startup-bound config changes alter the
+pod checksum. Never broaden the generated manager role beyond read/InfraEnv patch
+permissions without reviewing the controller contract.
 Run `make helm-lint helm-test test-alerts` before shipping chart changes.
-Install with `make deploy VALUES=site-values.yaml IMG_REPO=<registry>/herzi IMG_TAG=<tag>`.
+Install with `make deploy VALUES=site-values.yaml IMG_REPO=registry.example.com/herzi IMG_TAG=0.1.0`.
 Package with `make helm-package`.
 
 ### Publish Container Image
 
 ```bash
-export IMG=<registry>/<project>:<version>
+export IMG=registry.example.com/herzi:0.1.0
 make docker-build docker-push IMG=$IMG
 ```
 

@@ -1,6 +1,6 @@
 # herzi
 
-Deployment source of truth during the documentation migration: [Helm chart guide](charts/herzi/README.md).
+Deployment source of truth: [Helm chart guide](charts/herzi/README.md).
 
 herzi is the inventory controller for an MCE hub. It keeps each opted-in
 InfraEnv's spare machines aligned with HyperShift NodePool demand. NodePools
@@ -24,13 +24,11 @@ and preserves the last good snapshot when an update cannot be parsed.
 lowering demand or the buffer only stops additions. VM creation, orphan-binding
 detection and an idempotency key on the install route remain backlog items.
 
-The controller, metrics, manager wiring, RBAC and packaging are implemented and tested:
-unit tests, an envtest suite against a real kube-apiserver, `golangci-lint` and
-`govulncheck` are clean. What has **not** been exercised: a container build, a real
-cluster, a live Temporal service and the install route, and the hosted CI workflow
-(none of them are available in the development workspace). Roll out as the
-[operating guide](docs/ops/operating.md#integration-status-and-release-gates) describes:
-every pool starts with `dryRunGrow: true`.
+The controller, metrics, manager wiring, generated RBAC and Helm packaging are implemented.
+The repository provides unit tests, an envtest integration suite, chart assertions and
+promtool alert tests. A live hub rollout, Temporal and workflows connectivity, worker
+queues and admission still require the [real-hub checks](docs/ops/operating.md#to-verify-on-a-real-hub).
+Start every pool with `dryRunGrow: true`.
 
 ## Architecture
 
@@ -52,54 +50,53 @@ Lease: one active controller     HTTPS metrics: Prometheus -> alerts -> runbook
 
 ## Quickstart
 
-Use the Go version in go.mod or newer. Build/test need Go and downloadable modules;
-integration uses pinned setup-envtest and a local API server/etcd, without Docker.
+Use the Go version in `go.mod` for development, Helm 4.3.1, Python with PyYAML
+for chart assertions, and promtool for alert tests. Container builds need Docker or
+Podman. Integration tests use envtest's local API server and etcd.
 
 ```bash
 export PATH=/home/linuxbrew/.linuxbrew/bin:$PATH
 make build
-make test                     # unit race tests, cover.out
-make test-integration         # envtest: a real kube-apiserver and etcd, CRD stubs from test/crds
-make ci                       # lint, vet, unit tests, govulncheck
-make lint-manifests
+make test
+make test-integration
+make ci  # lint, vet, unit tests, vuln, helm-lint, helm-test, test-alerts, manifests-drift
 ```
 
-Before running locally, complete the release gates, adapt every hub endpoint and
-queue in `config/samples/herzi-config.yaml`, and set `dryRunGrow: true` on every
-managed pool. Supply Temporal TLS file paths and optional API token as described
-in the [operating guide](docs/ops/operating.md#secrets-and-secure-monitoring).
-Local execution uses your current kubeconfig identity and can order real machines.
+`make ci` excludes integration tests and image builds; CI runs those in separate
+jobs. `make helm-test` asserts chart rendering locally.
+
+Choose the target hub deliberately, with the external Agent, InfraEnv and NodePool
+CRDs already installed. Review [RBAC](docs/ops/rbac.md). Copy the example values,
+replace its illustrative endpoints, registry, canonical MCE hub name and pools,
+and keep every pool at `dryRunGrow: true` (also set `config.defaults.dryRunGrow: true`).
 
 ```bash
-make run CONFIG=config/samples/herzi-config.yaml
-# Equivalent after building:
-./bin/manager --leader-elect=false --config=config/samples/herzi-config.yaml \
-  --health-probe-bind-address=:8081 --metrics-bind-address=:8443
-```
-
-Deployment requires the hub's real external CRDs, reviewed generated RBAC and
-provisioned TLS Secrets. Envtest CRDs are permissive test fixtures only. Select
-an immutable image and a deliberately chosen kubeconfig context.
-
-```bash
-make manifests                # controller markers generate config/rbac/role.yaml
-# Review docs/ops/rbac.md and enable the generated role and binding after review.
-make docker-build IMG=<registry>/herzi:<version> VERSION=<version> COMMIT=<commit>
-make docker-push IMG=<registry>/herzi:<version>
-kubectl kustomize config/default
-make deploy IMG=<registry>/herzi:<version>
+cp charts/herzi/ci/example-values.yaml my-hub-values.yaml
+make docker-build IMG=registry.example.com/herzi:0.1.0 VERSION=0.1.0 COMMIT=unknown
+make docker-push IMG=registry.example.com/herzi:0.1.0
+helm template herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set image.tag=0.1.0
+helm upgrade --install herzi charts/herzi -n herzi-system --create-namespace \
+  -f my-hub-values.yaml --set image.tag=0.1.0
+# Equivalent installation, with an explicit image repository:
+make deploy VALUES=my-hub-values.yaml IMG_REPO=registry.example.com/herzi IMG_TAG=0.1.0
 kubectl -n herzi-system rollout status deployment/herzi
-# Optional, with Prometheus Operator CRDs and monitoring credentials installed:
-kubectl apply -k config/prometheus
 ```
 
-The sample has three pools, all with dry-run growth enabled or paused. The optional
-NetworkPolicy must be edited for actual endpoint IPs before applying. Never apply
-`test/crds` to a real hub. There is no CRD install/uninstall target.
+Set `image.repository`, `config.hubName`, `config.installURL` and
+`config.temporalAddress`; missing required values fail Helm validation before
+installation. The chart renders the ConfigMap from `config`. It creates no CRDs
+or Secrets and has no Namespace template. Helm's `--create-namespace` creates
+the release namespace, which uninstall preserves. Never install `test/crds` on
+a real hub. See [Install on OpenShift](docs/ops/operating.md#install-on-openshift)
+for binary builds, credentials, monitoring, upgrades and uninstall.
+
+For local development, `make run` extracts the example's controller settings into
+`/tmp/herzi-dev-config.yaml` and uses the current kubeconfig. Replace the example
+endpoints in the values source before running; local execution can order machines.
 
 ## Configuration
 
-Hub settings sit at the YAML top level. Every pool setting lives under `defaults`
+Helm values put controller settings under `config`; the rendered controller file has hub settings at its YAML top level. Every pool setting lives under `defaults`
 and may be overridden under `pools.<InfraEnv name>`; the presence of that name opts
 in. Explicit zero/false are overrides; omissions inherit. Durations are strings.
 “Required/site-specific” means no portable default is defined by the design or
@@ -115,7 +112,7 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | maxSlots | 100 | Hub | Must equal the API route slot range |
 | ambiguousWait | 5m | Hub | Persisted block after an unclear POST |
 | stuckAfter | 2h | Hub | Startup open-run warning age; exported as herzi_stuck_after_seconds; restart to change |
-| temporalAddress | Required/site-specific | Hub | Temporal host:port (plain gRPC unless the TLS component is used) |
+| temporalAddress | Required/site-specific | Hub | Temporal host:port (plain gRPC unless Temporal TLS is enabled) |
 | temporalNamespace | default | Hub | Temporal namespace |
 | activityQueue | server-lifecycle-activity-<hubName> | Hub | Hub activity queue, derived from hubName when not written |
 | workflowQueue | install-server-workflow | Hub | Install workflow queue |
@@ -132,7 +129,7 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | defaults | Pool defaults above | Hub structure | Base for every listed pool |
 | pools | Empty; no managed pools | Hub structure | InfraEnv name to pool override mapping |
 
-See the complete [sample](config/samples/herzi-config.yaml), including all Temporal
+See the complete [example values](charts/herzi/ci/example-values.yaml), including all Temporal
 fields in the shared config contract. TLS paths and API bearer token are supplied
 via Secret mounts/environment, not YAML. `maxSlots` must equal 100. Validate
 `0 <= highPct <= 1000`, `0 <= minFree <= 100000`, `1 <= maxOpenRunsPerPool <= 100`, positive durations,
@@ -174,7 +171,7 @@ These are document/schema errors: startup fails, and a reload rejects the entire
 retaining the last good configuration. Invalid values of supported keys in merged pools
 instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
 Deploy the migrated config with the new image. Rollback requires the matching old config
-as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
+as well as the old image; `helm rollback` restores the previous release values and its rendered ConfigMap. Choose
 `highPct: 15` explicitly for the former target buffer; the new default is 10.
 
 ## Decision table
@@ -290,8 +287,8 @@ preceding `herzi_pool_` prefix (for example `_assigned` means `herzi_pool_assign
 | `herzi_last_successful_reconcile_timestamp_seconds` | gauge | pool | liveness of a pool |
 
 
-Alerts use only these names. See [alert rules](config/prometheus/herzi-alerts.yaml)
-and the [runbook](docs/ops/runbook.md). Platform scrape-target alerts are also
+Alerts use only these names. See [alert rules](charts/herzi/files/alerts.rules.yaml)
+and the [runbook](docs/ops/runbook.md). Enable them with `prometheusRule.enabled: true` and verify with `make test-alerts`. Platform scrape-target alerts are also
 needed to detect a missing controller before pool series exist.
 
 ## Documentation

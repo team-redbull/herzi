@@ -250,6 +250,7 @@ internal/pipeline/
 internal/ids/                  workflow-id builders; a test pins them to the Python builders
 internal/installer/            I/O: POST install-server
 internal/config/               Config, validation, last-good on a bad update
+charts/herzi/                  Helm deployment, values, generated RBAC and alert rules
 ```
 
 ## Workflow ids
@@ -581,7 +582,7 @@ These are document/schema errors: startup fails, and a reload rejects the entire
 retaining the last good configuration. Invalid values of supported keys in merged pools
 instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
 Deploy the migrated config with the new image. Rollback requires the matching old config
-as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
+as well as the old image; Helm rollback restores release values and the ConfigMap rendered by the chart. Choose
 `highPct: 15` explicitly for the former target buffer; the new default is 10.
 
 `minFree` is the operator's to size: the largest scale request to absorb without a wait, plus the surge of

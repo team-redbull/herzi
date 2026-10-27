@@ -4,6 +4,172 @@ This implements design Part 2, Config: “Hub settings ... cannot differ per poo
 and Part 1, cases 9–15 (ambiguity, lease loss, pause and dry run). The design is
 the behavior contract.
 
+## Install on OpenShift
+
+Run from the repository root against the intended MCE hub. These steps also apply
+to plain Kubernetes: use `kubectl` instead of `oc`, an externally pushed image,
+and `networkPolicy.dns: kubernetes`. The chart requires Kubernetes 1.27 or newer.
+
+### 1. Check hub prerequisites
+
+```bash
+oc get crd agents.agent-install.openshift.io infraenvs.agent-install.openshift.io nodepools.hypershift.openshift.io
+oc auth can-i create clusterroles.rbac.authorization.k8s.io
+```
+
+Expect all three operator-owned CRDs and `yes`. Install the agent-install and
+HyperShift operators first if they are missing. Use a cluster-admin identity for
+installing the ClusterRole and its binding, or have the administrator provision
+all RBAC and select `rbac.create: false` as described in [rbac.md](rbac.md).
+
+The controller pod must reach Kubernetes, Temporal's configured host:port and the
+workflows API. Set `config.installURL` to **the same full URL used today to call
+install-server**: use the Service address if the workflows brain is on this
+cluster, otherwise its Route, retaining `/workflows/server-lifecycle/install-server`.
+Do not invent a new endpoint. `config.hubName` is the canonical MCE name used in
+install requests, normally `ocp4-...`; match the hub worker queue and Temporal
+namespace. Confirm these network paths from the hub before enabling growth.
+
+### 2. Build and publish an immutable image
+
+For a registry you can push to (replace the example repository and tag):
+
+```bash
+make docker-build IMG=registry.example.com/herzi:0.1.0 VERSION=0.1.0 COMMIT=unknown
+make docker-push IMG=registry.example.com/herzi:0.1.0
+# Podman alternative:
+make docker-build docker-push CONTAINER_TOOL=podman IMG=registry.example.com/herzi:0.1.0 VERSION=0.1.0 COMMIT=unknown
+```
+
+Expect a successful build and push. Set `VERSION` to your release and `COMMIT` to
+the source revision recorded by your build system; `unknown` is a literal fallback.
+The Dockerfile builds a static binary, then copies it into a distroless image.
+
+Alternatively, use an OpenShift binary Docker build (create the project once):
+
+```bash
+oc new-project herzi-system
+oc new-build --binary --strategy=docker --name=herzi -n herzi-system
+oc start-build herzi --from-dir=. --follow -n herzi-system
+```
+
+Expect the build to complete and push an ImageStream image to
+`image-registry.openshift-image-registry.svc:5000/herzi-system/herzi:latest`.
+For this path use repository
+`image-registry.openshift-image-registry.svc:5000/herzi-system/herzi` and tag
+`latest`; use `image.pullPolicy: Always` when reusing that tag. Prefer assigning
+an immutable release tag for upgrades. If the project already exists, skip
+`oc new-project`. The binary build uses the Dockerfile's default version metadata
+unless build arguments are configured separately.
+
+Air-gapped clusters must mirror both Dockerfile base images: `golang:1.27.3` and
+`gcr.io/distroless/static:nonroot`. Configure the build's registry mirror access
+before starting it; the builder also needs a reachable Go module source/cache.
+
+### 3. Write hub values
+
+```bash
+cp charts/herzi/ci/example-values.yaml my-hub-values.yaml
+```
+
+Expect a local values file with three illustrative pools; edit it for this hub.
+Required values are `image.repository`, `config.hubName`, `config.installURL` and
+`config.temporalAddress`. Replace the example endpoints and `config.activityQueue`
+(or leave the queue empty to derive it from hubName). List only the InfraEnv names
+to manage under `config.pools`. Set `config.defaults.dryRunGrow: true` and keep
+**every pool** at `dryRunGrow: true`; a per-pool false overrides the default.
+Provision any opted-in Secrets separately in `herzi-system` before installation.
+Missing required values fail Helm validation early; the default manages no pools.
+
+### 4. Render and install
+
+```bash
+export PATH=/home/linuxbrew/.linuxbrew/bin:$PATH
+helm lint --strict charts/herzi -f my-hub-values.yaml
+helm template herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set image.tag=0.1.0
+helm upgrade --install herzi charts/herzi -n herzi-system --create-namespace -f my-hub-values.yaml --set image.tag=0.1.0
+# Equivalent repository target:
+make deploy VALUES=my-hub-values.yaml IMG_REPO=registry.example.com/herzi IMG_TAG=0.1.0 NAMESPACE=herzi-system
+```
+
+Expect lint success, rendered YAML for review, then a deployed Helm release.
+Use your chosen image tag (including `latest` for the binary build) consistently.
+`make deploy` requires `VALUES`, `IMG_REPO` and `IMG_TAG`; `NAMESPACE` defaults to
+`herzi-system`. The ConfigMap is rendered from `config` in values. The chart has
+no Namespace template: Helm creates the namespace with `--create-namespace`.
+The pod sets no fixed UID or group; OpenShift restricted-v2 assigns one from the
+namespace range. The root filesystem is read-only and all capabilities are dropped.
+
+### 5. Verify before permitting orders
+
+```bash
+oc -n herzi-system get pods
+oc -n herzi-system rollout status deployment/herzi --timeout=120s
+oc -n herzi-system logs deployment/herzi -c manager --since=10m
+```
+
+Expect a Ready manager, successful rollout and observations/`Would install` logs
+for pools needing capacity, with no real install requests. Check the exact
+permission commands in [rbac.md](rbac.md#confirm-on-the-real-hub). Readiness alone
+does not prove Temporal or install API connectivity. Complete [To verify on a real
+hub](#to-verify-on-a-real-hub) and the [dry-run rollout](#dry-run-rollout) before
+changing one small pool to real growth.
+
+### 6. Upgrade, roll back and uninstall
+
+Use the [upgrade and rollback](#upgrade-and-rollback) commands below with matching
+image and values versions. Helm rollback restores the old values too, including
+the chart-rendered ConfigMap. Removed-key rejection means an old image needs the
+old values. Pool edits can safely use `helm upgrade`: they reload live without
+changing the startup checksum or restarting the pod.
+
+```bash
+helm uninstall herzi -n herzi-system
+# Equivalent repository target:
+make undeploy NAMESPACE=herzi-system
+```
+
+Expect the release resources, including ConfigMap, RBAC and optional monitoring
+and NetworkPolicy, to be removed. No chart-owned CRDs or Namespace resources are
+left because the chart installs neither. The Helm-created namespace and externally
+provisioned Secrets remain, as do MCE/HyperShift resources, OpenShift build objects,
+existing workflows and capacity already added. Uninstall does not reclaim machines.
+
+## Chart values reference
+
+The [chart guide](../../charts/herzi/README.md) and
+[values.yaml](../../charts/herzi/values.yaml) define the deployment contract.
+Each top-level value is listed here; controller defaults and pool settings are
+also documented in the chart guide.
+
+| Key | Purpose |
+| --- | --- |
+| `image` | Required repository, optional tag, pull policy (`IfNotPresent`). |
+| `replicaCount` | Deployment replica count, default 1; leader election selects one active process. |
+| `nameOverride` | Override the chart name portion of generated names. |
+| `fullnameOverride` | Override the whole generated base name. |
+| `goMemLimit` | GOMEMLIMIT, default `400MiB`. Adjust with the container memory limit. |
+| `resources` | Requests `100m` CPU/`128Mi`, limits `1` CPU/`512Mi`. |
+| `serviceAccount` | `create`, `name`, `annotations`; when not created, empty name selects `default`. |
+| `rbac` | `create` gates all roles/bindings; `metricsReader.subjects` optionally grants `/metrics` access. |
+| `config` | Exact controller config, described below; rendered verbatim as YAML in the ConfigMap. |
+| `temporal` | Existing CA/mTLS Secret and optional API-key Secret references. |
+| `installApi` | Optional existing bearer-token Secret reference. |
+| `metrics` | HTTPS metrics Service enabled by default, port 8443, optional existing TLS Secret. |
+| `serviceMonitor` | Opt-in monitor: interval, scrapeTimeout, labels, tlsConfig, bearerTokenSecret. |
+| `prometheusRule` | Opt-in shipped alerts and additional labels. |
+| `networkPolicy` | Opt-in egress restrictions and metrics ingress; platform DNS and endpoint CIDRs/ports. |
+| `nodeSelector` | Pod node label selection. |
+| `tolerations` | Pod tolerations. |
+| `affinity` | Pod affinity and anti-affinity. |
+| `topologySpreadConstraints` | Pod topology spread constraints. |
+| `priorityClassName` | Existing PriorityClass name. |
+| `podAnnotations` | Extra pod annotations; startup checksum takes precedence. |
+| `podLabels` | Extra pod labels; chart labels take precedence. |
+| `imagePullSecrets` | Existing registry Secret references, e.g. `[{name: registry}]`. |
+| `extraArgs` | Additional manager flags; avoid duplicating chart-owned arguments. |
+| `extraEnv` | Additional Kubernetes EnvVar entries; avoid duplicating chart-owned names. |
+
 ## Integration status and release gates
 
 The controller, metrics, manager wiring (`--config`, leader election with a stable id and release on
@@ -21,15 +187,16 @@ the release gates, to be closed on a real hub before the first real order:
 4. **The hosted CI workflow** (it is written and every step maps to a Makefile target that runs locally).
 
 Roll out in this order: install with every pool at `dryRunGrow: true`; read the `Would install` lines and the
-`herzi_pool_*` gauges for a few days; enable one small pool; then the rest. `make check-rbac` fails when the
-default install does not grant the controller what it reads (it caught a missing role once; it also runs in CI).
+`herzi_pool_*` gauges for a few days; enable one small pool; then the rest. `make helm-test` checks the rendered manager permissions and binding,
+and `make manifests-drift` guards the generated rules; both run in CI.
 
 ## Config model
 
 The mounted file is `/etc/herzi/config.yaml`, from the stable ConfigMap
-`herzi-config` in `herzi-system`. Edit [the sample](../../config/samples/herzi-config.yaml)
-for the hub before rendering. Hub fields are top-level; pool defaults live in
-`defaults`; only InfraEnv names listed in `pools` are managed. Every pool field
+`herzi-config` in `herzi-system` for the default release name. Edit [example values](../../charts/herzi/ci/example-values.yaml)
+for the hub before rendering. Helm values put hub fields under `config`, pool defaults
+under `config.defaults` and opted-in InfraEnv names under `config.pools`. In the
+rendered controller file, hub fields are top-level with `defaults` and `pools`. Every pool field
 can be overridden. Absent fields inherit; explicit `0` and `false` override.
 An empty pool mapping opts in with all defaults. Durations are strings such as
 `"120s"` and `"20m"`, never integer nanoseconds. All fields appear in the
@@ -50,9 +217,16 @@ A frozen snapshot serves each pass. There are exactly nine pool settings: `highP
 herzi polls the mounted file every ten seconds and requeues all pools when an accepted change
 appears; the directory mount avoids subPath so Kubernetes can refresh its contents (the kubelet
 needs up to about a minute). Check both the accepted-config metric and the logs after updating.
+Pool/default edits and live timing (`interval`, `reconcileTimeout`, `ambiguousWait`)
+reload without a rollout. Among controller settings, only startup-bound values
+(`hubName`, `agentNamespace`, `installURL`, `maxSlots`, `stuckAfter`,
+`temporalAddress`, `temporalNamespace`, `activityQueue`, `workflowQueue`, `segmentQueue`)
+change `checksum/startup-config` and restart pods. Thus `helm upgrade` is safe for
+pool edits. Changes to image, Secret references or pod scheduling also change the
+pod template and cause a rollout.
 
 ```bash
-kubectl kustomize config/samples | kubectl -n herzi-system apply -f -
+helm upgrade herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set image.tag=0.1.0
 kubectl -n herzi-system logs deployment/herzi -c manager --since=10m
 ```
 
@@ -148,76 +322,150 @@ and ignores only pool, keeping each controller's threshold separate. The rule us
 
 ## Secrets, TLS and secure monitoring
 
-No Secret values are shipped, and **none is required for the default install**: herzi speaks plain gRPC to
-Temporal (as every client inside the hub does) and serves metrics with the self-signed certificate that
-controller-runtime generates. TLS is opt-in through kustomize components, so a hub that does not use it
-never waits for a Secret that does not exist:
+The chart never creates Secrets. Create references in the release namespace using
+your secret manager; never put credentials in values or the ConfigMap. With no
+Secret references, Temporal uses plaintext gRPC and metrics use a self-signed
+certificate. Examples below are separate additions to your hub values.
 
-| Component | Adds | Needs the Secret | Keys |
-|---|---|---|---|
-| `config/components/temporal-tls` | `HERZI_TEMPORAL_TLS_CA_FILE` / `_CERT_FILE` / `_KEY_FILE`, a read-only mount at `/etc/herzi-temporal` | `herzi-temporal-tls` | `ca.crt`; `tls.crt` + `tls.key` for mTLS |
-| `config/components/metrics-tls` | `--metrics-cert-path`, a read-only mount at `/etc/herzi-metrics` | `herzi-metrics-tls` | `tls.crt`, `tls.key` (+ `ca.crt` for the ServiceMonitor) |
+Temporal TLS verifies the server with the existing Secret's `ca.crt`:
 
-`config/overlays/tls` shows both together; copy it per hub and keep only the components whose Secrets exist.
-Other secrets:
-
-| Secret | Keys | Consumer |
-|---|---|---|
-| herzi-api (optional) | token | `HERZI_API_BEARER_TOKEN` environment variable (absent when the Secret is absent) |
-| (any Secret you wire in) | api key | `HERZI_TEMPORAL_API_KEY` environment variable: a Temporal Cloud/API-key credential. Not set by default; add it to the Deployment yourself with a `secretKeyRef`. Never log or place it in the ConfigMap. |
-| herzi-prometheus-token | token | ServiceMonitor authorization credential |
-
-**Monitoring needs more than herzi does.** The shipped ServiceMonitor verifies the metrics certificate against the
-`ca.crt` in `herzi-metrics-tls` and presents the token in `herzi-prometheus-token`, and the Prometheus
-ServiceAccount must be bound to `metrics-reader`. So scraping requires the `metrics-tls` component, those Secrets
-and that binding; the default install (self-signed metrics certificate) is scrapeable only with TLS verification
-relaxed in your own ServiceMonitor. Because a scrape gap would also silence the alerts, the
-`HerziControllerDown` alert fires on missing series.
-
-Never embed TLS keys or bearer tokens in the ConfigMap. The mounted certificate files are world-readable
-inside the container (0444), which lets UID 65532 read Secrets owned by root; no writable root is needed.
-The bearer token and the TLS files are read at process start, so restart herzi after rotating them.
-Verification is never switched off.
-
-Metrics are HTTPS on 8443 with token authentication and authorization. Provision
-a certificate valid for `herzi-metrics.herzi-system.svc`; no cert-manager dependency
-is required. Secure monitoring is opt-in because it requires Prometheus Operator
-CRDs. Configure the Prometheus instance's ServiceMonitor/PrometheusRule selectors
-to discover `app.kubernetes.io/name: herzi` in `herzi-system`, allow its namespace
-through the metrics ingress policy (`metrics: enabled`), and bind its ServiceAccount
-to the scaffold `metrics-reader` ClusterRole. Provision/rotate the corresponding
-token in `herzi-prometheus-token` for the monitor; prefer a platform-managed
-short-lived credential refreshed before expiry over a permanent token. Prometheus
-Operator must have permission to read the referenced credential and CA Secrets.
-Do not use `insecureSkipVerify` or share the server's private key with Prometheus.
-
-```bash
-kubectl apply -k config/prometheus
+```yaml
+temporal:
+  tls:
+    existingSecret: herzi-temporal-tls
+    caKey: ca.crt
 ```
 
-The optional `config/network-policy` tree denies all controller egress except
-API server TCP 443/6443, Temporal TCP 7233, workflows TCP 443 and DNS UDP/TCP 53.
-Replace its TEST-NET IPs with actual endpoint ranges, adapt ports and DNS selectors,
-and verify your CNI's service DNAT/node-local DNS behavior before applying it.
-There are no allow-all egress exceptions. Its ingress rule permits HTTPS scrapes
-only from namespaces labelled `metrics: enabled`; kubelet probe handling is CNI
-specific and must be tested. DNS resolving a new endpoint IP does not update
-NetworkPolicy ipBlocks automatically.
+Temporal mTLS additionally requires `tls.crt` and `tls.key` in that same Secret:
+
+```yaml
+temporal:
+  tls:
+    existingSecret: herzi-temporal-tls
+  mtls:
+    enabled: true
+    certKey: tls.crt
+    keyKey: tls.key
+```
+
+Temporal API key (sets `HERZI_TEMPORAL_API_KEY` through secretKeyRef):
+
+```yaml
+temporal:
+  apiKey:
+    existingSecret: herzi-temporal-api
+    key: api-key
+```
+
+Workflows bearer token (sets `HERZI_API_BEARER_TOKEN` through secretKeyRef):
+
+```yaml
+installApi:
+  bearerToken:
+    existingSecret: herzi-api
+    key: token
+```
+
+Metrics TLS uses `tls.crt` and `tls.key` in an existing Secret. The certificate
+must cover `herzi-metrics.herzi-system.svc` for these monitoring examples:
+
+```yaml
+metrics:
+  tls:
+    existingSecret: herzi-metrics-tls
+```
+
+The ServiceMonitor requires Prometheus Operator CRDs and matching Prometheus
+selectors. OpenShift must have user-workload monitoring enabled for the namespace.
+Provision a rotating token and CA Secret readable by the monitoring operator;
+verify TLS rather than disabling verification. Use the metrics-reader subject
+example below for that token's ServiceAccount.
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    release: prometheus
+  tlsConfig:
+    insecureSkipVerify: false
+    serverName: herzi-metrics.herzi-system.svc
+    ca:
+      secret: {name: herzi-metrics-tls, key: ca.crt}
+  bearerTokenSecret: {name: herzi-prometheus-token, key: token}
+```
+
+Enable alert rules after installing Prometheus Operator CRDs; adapt labels to the
+Prometheus rule selector:
+
+```yaml
+prometheusRule:
+  enabled: true
+  labels:
+    release: prometheus
+```
+
+NetworkPolicy is opt-in. Replace **all** TEST-NET ranges below with actual endpoint
+IPs and ports before enabling it. Empty CIDR lists allow no traffic for that
+destination. OpenShift DNS uses `dns: openshift` (openshift-dns TCP/UDP 5353);
+plain Kubernetes uses `dns: kubernetes` (kube-system CoreDNS TCP/UDP 53).
+
+```yaml
+networkPolicy:
+  enabled: true
+  dns: openshift
+  metricsNamespaceSelector:
+    matchLabels: {metrics: enabled}
+  apiServer: {cidrs: [192.0.2.10/32], ports: [443, 6443]}
+  temporal: {cidrs: [192.0.2.20/32], ports: [7233]}
+  installApi: {cidrs: [192.0.2.30/32], ports: [443]}
+```
+
+The policy denies other ingress and egress. Check service DNAT, node-local DNS,
+kubelet probes and the actual CNI behavior. DNS changes do not update ipBlocks.
+Metrics ingress permits only the selected namespaces; label your monitoring
+namespace accordingly or change the selector.
+
+Grant authenticated metrics access to the scraping ServiceAccount:
+
+```yaml
+rbac:
+  metricsReader:
+    subjects:
+      - kind: ServiceAccount
+        name: prometheus
+        namespace: monitoring
+```
+
+The chart mounts certificates read-only at mode 0444 so the OpenShift-assigned UID
+can read them. Temporal files are under `/etc/herzi-temporal`, metrics files under
+`/etc/herzi-metrics`. Credentials are read at startup: Secret content rotation
+alone does not roll out pods. After rotating credentials, explicitly restart:
+
+```bash
+kubectl -n herzi-system rollout restart deployment/herzi
+```
+
+Complete examples are in `charts/herzi/ci/tls-values.yaml`, `mtls-values.yaml` and
+`full-values.yaml`. Missing scrape targets need platform alerts in addition to
+`HerziControllerDown`; a scrape gap otherwise silences pool alerts.
 
 ## Alert rule tests
 
-The shipped alert rules have promtool unit tests in `config/prometheus/herzi-alerts.test.yaml`. Run them with:
+The shipped alert rules have promtool unit tests in `charts/herzi/tests/alerts.test.yaml`. Run them with:
 
 ```bash
 make test-alerts      # needs promtool on PATH; CI installs a pinned, checksum-verified one
 ```
 
-promtool reads native rule groups, not the Kubernetes `PrometheusRule` wrapper, so `hack/test-alerts.sh` extracts
-`spec.groups` from the shipped file into a temporary directory and never modifies it. The tests cover configured stuck
+Rules live in `charts/herzi/files/alerts.rules.yaml`; enable their chart resource with
+`prometheusRule.enabled: true`. `hack/test-alerts.sh` runs promtool directly on the native rule
+groups and the test file, without extracting a Kubernetes wrapper. The tests cover configured stuck
 thresholds across several pools **and across two controller targets with different thresholds** (the series are
 matched by controller target, not by an empty key), bound capacity in excess of demand for three hours versus
 ordinary free spares, the controller's series going absent for ten minutes, and paused or pending pools being excluded from
-the blocked-pool alert. The test file is not a Kubernetes resource and is excluded from `kustomization.yaml`.
+the blocked-pool alert. The test file is not a Kubernetes resource and is not rendered by the chart.
 
 ## Dry-run rollout
 
@@ -227,10 +475,9 @@ the blocked-pool alert. The test file is not a Kubernetes resource and is exclud
    three examples do this); also set `defaults.dryRunGrow: true` for new pools.
    Confirm there are no per-pool false overrides. Keep new pools paused until
    inventory attribution is confirmed. Even zero demand seeds minFree machines.
-3. Build/test and deploy a fixed image tag/digest. Generate/review RBAC, render
-   `kubectl kustomize config/default`, and provision Secrets before the Pod starts.
-   `make deploy IMG=<registry>/herzi:<version>` selects the image in the manager
-   kustomization and applies the bundle to the current kubeconfig context.
+3. Build/test and deploy a fixed image tag. Review generated RBAC, inspect
+   `helm template herzi charts/herzi -n herzi-system -f my-hub-values.yaml`, and
+   provision referenced Secrets before the pod starts. Use the install commands above.
 4. Compare `Would install` logs to NodePool replicas, assigned/claimable/settling
    gauges and open slot histories. Simulate an empty-capacity failure, missing
    pollers, pause and invalid config; confirm blocks and last-good config behavior.
@@ -266,33 +513,31 @@ These are document/schema errors: startup fails, and a reload rejects the entire
 retaining the last good configuration. Invalid values of supported keys in merged pools
 instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
 Deploy the migrated config with the new image. Rollback requires the matching old config
-as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
+as well as the old image; Helm rollback restores old release values and its rendered ConfigMap. Choose
 `highPct: 15` explicitly for the former target buffer; the new default is 10.
 
-Record the current image digest and export the ConfigMap to a protected backup;
-back up Secrets in your secret manager. Compare config fields/metrics/RBAC and
-Temporal workflow-id compatibility across versions. First enable dry run, inspect
-pending installs, then deploy the new immutable image/config. The single replica
-uses RollingUpdate with maxSurge 0 and maxUnavailable 1, intentionally allowing
-an availability gap. Kubernetes can retain a terminating Pod while creating its
-replacement; the lease and immediate exit behavior remain necessary to prevent
-overlapping active reconcilers. There is no PDB: minAvailable 1 would block drains
-of the only replica, while maxUnavailable 1 adds no protection.
+Back up site values and keep Secrets in your secret manager. Compare config,
+metrics, RBAC and workflow-ID compatibility across versions. First enable dry run,
+inspect pending installs, then upgrade to a new immutable image and matching values.
+The single replica uses RollingUpdate with maxSurge 0/maxUnavailable 1, allowing
+an availability gap. A terminating pod can overlap its replacement; the lease and
+immediate exit remain necessary to prevent overlapping active reconcilers. No PDB
+is installed.
 
 ```bash
+helm upgrade herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set image.tag=0.1.1
 kubectl -n herzi-system rollout status deployment/herzi --timeout=120s
-kubectl -n herzi-system rollout history deployment/herzi
-# Restore the separately backed-up ConfigMap if its format changed, then:
-kubectl -n herzi-system rollout undo deployment/herzi
+helm history herzi -n herzi-system
+# Choose a compatible revision from history (example: 1):
+helm rollback herzi 1 -n herzi-system
 kubectl -n herzi-system rollout status deployment/herzi --timeout=120s
 ```
 
-Rollout undo restores only the Pod template, not ConfigMaps/Secrets/RBAC. Keep the
-image in your site kustomization consistent with rollback so the next apply does
-not undo it. Inspect logs and metrics before resuming growth. Undeploy deletes
-the packaged Namespace as well as controller objects; it leaves external CRDs
-untouched, but deletes namespaced config/Secrets/monitoring in that namespace.
-Back those up and assess other namespace users before `make undeploy`.
+Rollback restores the previous revision's chart, workload **and values**, including
+its rendered ConfigMap and RBAC. Removed-key rejection means an old image must
+receive its old values. Secrets are external and are not restored by rollback;
+keep their credentials compatible. Inspect logs and metrics before resuming growth.
+Uninstall and its exact retention behavior are documented in the installation steps.
 
 ## Lease loss and restart
 

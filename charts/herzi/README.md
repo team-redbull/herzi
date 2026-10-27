@@ -12,7 +12,7 @@ helm install herzi charts/herzi --namespace herzi-system --create-namespace \
 make deploy VALUES=site-values.yaml IMG_REPO=registry.example.com/herzi IMG_TAG=0.1.0
 ```
 
-`site-values.yaml` must set `config.hubName`, `config.installURL` (absolute HTTP(S) install-server route), and `config.temporalAddress` (host:port). `image.repository` is also required. Missing values fail schema validation before installation. `image.tag` defaults to Chart.appVersion. Do not deploy the illustrative endpoints in `ci/example-values.yaml` unchanged. All three example pools have `dryRunGrow: true`; keep every pool in dry run until the hub, worker queues, Temporal history and install route have been verified. The default chart manages no pools.
+`site-values.yaml` must set `config.hubName`, `config.installURL` (absolute HTTP(S) install-server endpoint, using its Service address on the same cluster or Route otherwise), and `config.temporalAddress` (host:port). `image.repository` is also required. Missing values fail schema validation before installation. `image.tag` defaults to Chart.appVersion. Do not deploy the illustrative endpoints in `ci/example-values.yaml` unchanged. All three example pools have `dryRunGrow: true`; keep every pool in dry run until the hub, worker queues, Temporal history and install route have been verified. The default chart manages no pools.
 
 The release namespace is supplied by Helm, rather than created by a chart template. Apply any site namespace security labels separately. Resource names use the release name and chart name (release `herzi` produces `herzi`, `herzi-config`, `herzi-manager`, etc.). `nameOverride` changes the chart name portion; `fullnameOverride` selects the whole base name. Cluster-scoped RBAC names must be unique across releases, including releases in different namespaces.
 
@@ -22,7 +22,8 @@ The release namespace is supplied by Helm, rather than created by a chart templa
 | --- | --- |
 | `image` | Required repository, optional tag, pull policy (`IfNotPresent`). |
 | `replicaCount` | Deployment replica count, default 1; leader election selects one active process. |
-| `nameOverride`, `fullnameOverride` | Override generated base resource names. |
+| `nameOverride` | Override the chart name portion of generated names. |
+| `fullnameOverride` | Override the whole generated base name. |
 | `goMemLimit` | GOMEMLIMIT, default `400MiB`. Adjust with the container memory limit. |
 | `resources` | Requests `100m` CPU/`128Mi`, limits `1` CPU/`512Mi`. |
 | `serviceAccount` | `create`, `name`, `annotations`; when not created, empty name selects `default`. |
@@ -34,15 +35,20 @@ The release namespace is supplied by Helm, rather than created by a chart templa
 | `serviceMonitor` | Opt-in monitor: interval, scrapeTimeout, labels, tlsConfig, bearerTokenSecret. |
 | `prometheusRule` | Opt-in shipped alerts and additional labels. |
 | `networkPolicy` | Opt-in egress restrictions and metrics ingress; platform DNS and endpoint CIDRs/ports. |
-| `nodeSelector`, `tolerations`, `affinity` | Standard Kubernetes scheduling controls. |
-| `topologySpreadConstraints`, `priorityClassName` | Standard Kubernetes topology and priority controls. |
-| `podAnnotations`, `podLabels` | Extra pod metadata; chart selector labels and checksum take precedence. |
+| `nodeSelector` | Pod node label selection. |
+| `tolerations` | Pod tolerations. |
+| `affinity` | Pod affinity and anti-affinity. |
+| `topologySpreadConstraints` | Pod topology spread constraints. |
+| `priorityClassName` | Existing PriorityClass name. |
+| `podAnnotations` | Extra pod annotations; startup checksum takes precedence. |
+| `podLabels` | Extra pod labels; chart labels take precedence. |
 | `imagePullSecrets` | Existing registry Secret references, e.g. `[{name: registry}]`. |
-| `extraArgs`, `extraEnv` | Additional manager flags and Kubernetes EnvVar entries. Avoid duplicating chart-owned arguments or environment names. |
+| `extraArgs` | Additional manager flags; avoid duplicating chart-owned arguments. |
+| `extraEnv` | Additional Kubernetes EnvVar entries; avoid duplicating chart-owned names. |
 
 ## Controller configuration
 
-`config` contains only controller settings. Durations use Go duration strings such as `120s`, `20m`, `1h30m`; days and weeks are unsupported. Unknown config/default/pool keys fail validation. `lowPct` and `minBand` were removed and must be deleted, even when zero or null. Use `highPct` for the single target buffer percentage. Explicit zero and false pool overrides are preserved.
+`config` contains only controller settings. Durations use Go duration strings such as `120s`, `20m`, `1h30m`; days and weeks are unsupported. Unknown controller, default or pool keys fail validation. `lowPct` and `minBand` were removed and must be deleted, even when zero or null. Use `highPct` for the single target buffer percentage. Explicit zero and false pool overrides are preserved.
 
 | `config` key | Default | Meaning |
 | --- | --- | --- |
@@ -50,7 +56,7 @@ The release namespace is supplied by Helm, rather than created by a chart templa
 | `reconcileTimeout` | `60s` | Overall reconcile deadline. |
 | `hubName` | required | MCE identity; controller canonicalizes the `ocp4-` prefix. |
 | `agentNamespace` | `inventory` | InfraEnv and Agent namespace. |
-| `installURL` | required | Full HTTP(S) workflows install-server route. |
+| `installURL` | required | Full HTTP(S) workflows install-server endpoint (Service address or Route). |
 | `maxSlots` | `100` | Fixed API slot range; any other value is rejected. |
 | `ambiguousWait` | `5m` | Persisted wait after an unclear POST. |
 | `stuckAfter` | `2h` | Startup open-run alert threshold exported as a metric. |
@@ -96,7 +102,7 @@ The chart never creates Secrets or accepts secret values. All referenced Secrets
 
 `ci/tls-values.yaml` demonstrates CA verification and a metrics certificate; `ci/mtls-values.yaml` adds a client certificate. `ci/full-values.yaml` additionally enables monitoring, network policy, API credentials and a metrics reader subject. These are complete illustrative values files, suitable for strict linting.
 
-Metrics are authenticated HTTPS on port 8443. `metrics.enabled` gates the Service; set the ServiceMonitor separately. Install Prometheus Operator CRDs before enabling `serviceMonitor.enabled` or `prometheusRule.enabled`. Rendering is deterministic and never depends on API discovery. Supply `serviceMonitor.tlsConfig.serverName` matching the certificate and `tlsConfig.ca.secret` with `name`/`key`; verification is enabled by default. Set `bearerTokenSecret` to a rotating Prometheus token reference and add its ServiceAccount to `rbac.metricsReader.subjects`. ServiceMonitor labels must match your Prometheus selection.
+Metrics are authenticated HTTPS on port 8443. `metrics.enabled` gates the Service; set the ServiceMonitor separately. Install Prometheus Operator CRDs before enabling `serviceMonitor.enabled` or `prometheusRule.enabled`. Rendering is deterministic and never depends on API discovery. Supply `serviceMonitor.tlsConfig.serverName` matching the certificate and `tlsConfig.ca.secret` with `name`/`key`; verification is enabled by default. Set `bearerTokenSecret` to a rotating Prometheus token reference and add its ServiceAccount to `rbac.metricsReader.subjects`. ServiceMonitor labels must match your Prometheus selection. On OpenShift, enable user-workload monitoring for this namespace before using the ServiceMonitor.
 
 Manager RBAC is generated from controller markers into `files/rbac-rules.yaml`; never hand-edit it. The manager reads Agents, InfraEnvs and NodePools and patches InfraEnvs; it cannot create, update or delete those objects. A namespaced role manages leader-election leases and emits events, without ConfigMap access. Metrics auth can create TokenReviews and SubjectAccessReviews. The metrics-reader ClusterRole allows only GET `/metrics`, with no binding unless subjects are supplied. With `rbac.create: false`, provision all required roles and bindings externally.
 
@@ -116,4 +122,4 @@ helm uninstall herzi -n herzi-system
 
 `hack/test-chart.sh` lints all four examples and asserts RBAC, security, image defaults, config contents, startup checksum behavior, TLS/mTLS, optional resources, literal Prometheus templates, labels, namespaces and rejection of invalid values. `hack/test-alerts.sh` uses promtool directly on the shipped native `files/alerts.rules.yaml` and every case in `tests/alerts.test.yaml`, including two controller targets. Go tests load the example config through the strict production loader and compare every chart config default with the code.
 
-Uninstall removes release-managed resources, including its ConfigMap and RBAC. The namespace and externally provisioned Secrets remain. Back up site values and use a matching config when rolling back an image; capacity previously added is never reclaimed.
+Uninstall removes release-managed resources, including its ConfigMap and RBAC. The namespace and externally provisioned Secrets remain. The chart leaves no release-managed resources or owned CRDs behind. Back up site values; `helm rollback` restores the old release values and rendered ConfigMap together with the workload, so an old image receives its matching config; capacity previously added is never reclaimed.
