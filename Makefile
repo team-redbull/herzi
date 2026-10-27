@@ -69,7 +69,7 @@ build-installer: manifests kustomize ## Render an installation bundle (no CRDs).
 	mkdir -p dist
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller="$(IMG)"
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
-deploy: manifests kustomize ## Deploy to the current kubeconfig context after the WP6 RBAC gate.
+deploy: manifests kustomize ## Deploy to the current kubeconfig context (create the herzi-config ConfigMap too: see docs/ops/operating.md).
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller="$(IMG)"
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 undeploy: kustomize ## Delete the installation, including its namespace; back up secrets first.

@@ -324,7 +324,7 @@ The design Part 3, F requires all of the following before enabling growth:
 Also verify the discovery-image disk wipe runs before Agent registration, fails
 closed and covers every disk for both VM and bare-metal pools. Confirm all Agents
 are auto-approved by the hub, since herzi's RBAC does not approve them. Verify
-TLS identity, Secret rotation, restricted Pod admission (including OpenShift UID
-policy for fixed UID 65532), RBAC, probes, lease loss, restart ambiguity blocks,
+TLS identity, Secret rotation, restricted Pod admission (the Deployment sets no
+fixed UID, so OpenShift's restricted-v2 SCC assigns one from the namespace range), RBAC, probes, lease loss, restart ambiguity blocks,
 network policy and real worker failures. None of these cluster checks were run
 in the packaging workspace.
