@@ -22,7 +22,7 @@ config:
     drawGrace: 2m
     failureMemory: 6h
     settlingMax: 60m
-    dryRunGrow: false
+    dryRunGrow: true
     paused: false
   pools:
     32-128-zone-1:

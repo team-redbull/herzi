@@ -36,7 +36,7 @@ config:
     drawGrace: 2m # Wait for acquisition evidence; less than probeInterval.
     failureMemory: 6h # Remember failures; at least twice probeInterval.
     settlingMax: 60m # Unbound Agent age; at least probeInterval.
-    dryRunGrow: false # Record intended orders without calling install-server.
+    dryRunGrow: true # Log intended orders instead of calling install-server; set false per pool to go live.
     paused: false # Suspend growth for this pool.
   pools: {} # InfraEnv name to overrides; presence opts in.
 temporal:

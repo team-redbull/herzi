@@ -3,7 +3,7 @@ package config
 import "time"
 
 func Defaults() PoolConfig {
-	return PoolConfig{HighPct: 10, MinFree: 2, MaxOpenRunsPerPool: 15,
+	return PoolConfig{HighPct: 10, MinFree: 2, DryRunGrow: true, MaxOpenRunsPerPool: 15,
 		ProbeInterval: 20 * time.Minute, DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour}
 }
 

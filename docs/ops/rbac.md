@@ -31,7 +31,7 @@ selects the controller ServiceAccount. The `herzi-metrics-auth` ClusterRole and 
 allow that account to create TokenReviews and SubjectAccessReviews. The
 `herzi-metrics-reader` ClusterRole grants only GET `/metrics`; its binding is rendered
 only when `rbac.metricsReader.subjects` is nonempty. Add the Prometheus ServiceAccount
-there; never grant anonymous access. Names follow the chart's fullname overrides.
+there; never grant anonymous access. Names derive from the release name.
 
 Config is a mounted file that herzi polls, so **no ConfigMap permission is needed**. No Agent approval,
 status, finalizer, delete, NodePool write or CRD permission exists.

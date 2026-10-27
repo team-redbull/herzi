@@ -209,7 +209,7 @@ func TestF8MalformedAgentIsolatedToItsPool(t *testing.T) {
 
 func TestF10ConfigErrorBlocksOnlyInvalidPool(t *testing.T) {
 	f := setup(t, testConfig(), infra("p"), infra("q"), infra("r"))
-	require.NoError(t, f.r.cfg.Update([]byte("hubName: hub\ninstallURL: http://api/install\npools:\n  p: {paused: true}\n  q: {highPct: -1}\n  r: {}\n")))
+	require.NoError(t, f.r.cfg.Update([]byte("hubName: hub\ninstallURL: http://api/install\ndefaults: {dryRunGrow: false}\npools:\n  p: {paused: true}\n  q: {highPct: -1}\n  r: {}\n")))
 	for _, pool := range []string{"p", "q", "r"} {
 		f.reconcile(t, pool)
 	}

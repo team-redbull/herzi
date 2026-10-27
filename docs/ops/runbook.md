@@ -5,7 +5,7 @@ and Part 3, orphan-bound Agents and stuck runs. Replace pool names with the
 alert's `pool` label; the namespace below assumes the shipped example.
 
 Alert rules live in [charts/herzi/files/alerts.rules.yaml](../../charts/herzi/files/alerts.rules.yaml),
-with promtool cases in `charts/herzi/tests/alerts.test.yaml`. Run `make test-alerts`;
+with promtool cases in `hack/chart/alerts.test.yaml`. Run `make test-alerts`;
 enable the chart resource with `prometheusRule.enabled: true` after installing
 Prometheus Operator CRDs and configuring rule discovery.
 

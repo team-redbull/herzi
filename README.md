@@ -1,6 +1,8 @@
 # herzi
 
-Deployment source of truth: [Helm chart guide](charts/herzi/README.md).
+Deployment guidance: [Operating guide](docs/ops/operating.md), with defaults in
+[values.yaml](charts/herzi/values.yaml) and validation in
+[values.schema.json](charts/herzi/values.schema.json).
 
 herzi is the inventory controller for an MCE hub. It keeps each opted-in
 InfraEnv's spare machines aligned with HyperShift NodePool demand. NodePools
@@ -28,7 +30,7 @@ The controller, metrics, manager wiring, generated RBAC and Helm packaging are i
 The repository provides unit tests, an envtest integration suite, chart assertions and
 promtool alert tests. A live hub rollout, Temporal and workflows connectivity, worker
 queues and admission still require the [real-hub checks](docs/ops/operating.md#to-verify-on-a-real-hub).
-Start every pool with `dryRunGrow: true`.
+Every pool starts in dry run: `dryRunGrow` defaults to `true`.
 
 ## Architecture
 
@@ -63,15 +65,18 @@ make ci  # lint, vet, unit tests, vuln, helm-lint, helm-test, test-alerts, manif
 ```
 
 `make ci` excludes integration tests and image builds; CI runs those in separate
-jobs. `make helm-test` asserts chart rendering locally.
+jobs. `make helm-test` asserts chart rendering and the exact package contents locally.
+`make helm-package` produces the 19-file chart archive in `bin/`: chart metadata,
+defaults, schema, `.helmignore`, 13 template/helper files, generated RBAC and native
+alert rules. Examples and tests live in `hack/chart/` and are excluded from the package.
 
 Choose the target hub deliberately, with the external Agent, InfraEnv and NodePool
 CRDs already installed. Review [RBAC](docs/ops/rbac.md). Copy the example values,
 replace its illustrative endpoints, registry, canonical MCE hub name and pools,
-and keep every pool at `dryRunGrow: true` (also set `config.defaults.dryRunGrow: true`).
+and leave `dryRunGrow` at its default `true` until you have read the `Would install` logs.
 
 ```bash
-cp charts/herzi/ci/example-values.yaml my-hub-values.yaml
+cp hack/chart/example-values.yaml my-hub-values.yaml
 make docker-build IMG=registry.example.com/herzi:0.1.0 VERSION=0.1.0 COMMIT=unknown
 make docker-push IMG=registry.example.com/herzi:0.1.0
 helm template herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set image.tag=0.1.0
@@ -92,7 +97,7 @@ for binary builds, credentials, monitoring, upgrades and uninstall.
 
 For local development, `make run` extracts the example's controller settings into
 `/tmp/herzi-dev-config.yaml` and uses the current kubeconfig. Replace the example
-endpoints in the values source before running; local execution can order machines.
+endpoints in `hack/chart/example-values.yaml` before running; local execution can order machines.
 
 ## Configuration
 
@@ -124,12 +129,13 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | drawGrace | 2m | Pool | Minimum age of a post-failure Running run with completed acquire_servers |
 | failureMemory | 6h | Pool | Closed failure evidence window |
 | settlingMax | 60m | Pool | Unclaimable Agent settling allowance |
-| dryRunGrow | false | Pool | Log Would install without posting |
+| dryRunGrow | true | Pool | Log Would install without posting |
 | paused | false | Pool | Observe but never order |
 | defaults | Pool defaults above | Hub structure | Base for every listed pool |
 | pools | Empty; no managed pools | Hub structure | InfraEnv name to pool override mapping |
 
-See the complete [example values](charts/herzi/ci/example-values.yaml), including all Temporal
+See the [chart values reference](docs/ops/operating.md#chart-values-reference) and
+the complete [example values](hack/chart/example-values.yaml), including all Temporal
 fields in the shared config contract. TLS paths and API bearer token are supplied
 via Secret mounts/environment, not YAML. `maxSlots` must equal 100. Validate
 `0 <= highPct <= 1000`, `0 <= minFree <= 100000`, `1 <= maxOpenRunsPerPool <= 100`, positive durations,
@@ -153,7 +159,7 @@ are outside pool accounting. The authoritative builders are
 `/home/toto/code/workflows/shared/workflow_ids.py`.
 
 Runs started before the workflows PR keep their previous IDs and are not accounted
-for by this controller. Start every pool in dry run. Enable real growth
+for by this controller. Pools start in dry run. Enable real growth
 (`dryRunGrow: false`) only after verifying in Temporal that no previous-ID install
 runs are still open. There is no automatic multi-family accounting.
 
@@ -294,6 +300,7 @@ needed to detect a missing controller before pool series exist.
 ## Documentation
 
 - [Design, Parts 1–3](docs/design/herzi-design.md)
+- [Implementation decision notes](docs/design/notes/README.md)
 - [Plan, ownership, metric contract and production definition of done](docs/PLAN.md)
 - [Operating guide and real-hub verification](docs/ops/operating.md)
 - [Alert runbook](docs/ops/runbook.md)

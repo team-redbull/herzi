@@ -101,7 +101,9 @@ func agent(name, pool string) *unstructured.Unstructured {
 	return u
 }
 func testConfig() config.Config {
-	return config.Config{HubConfig: config.DefaultHub(), Defaults: config.Defaults(), Pools: map[string]config.PoolOverride{"p": {}, "q": {}}}
+	defaults := config.Defaults()
+	defaults.DryRunGrow = false
+	return config.Config{HubConfig: config.DefaultHub(), Defaults: defaults, Pools: map[string]config.PoolOverride{"p": {}, "q": {}}}
 }
 
 type fixture struct {

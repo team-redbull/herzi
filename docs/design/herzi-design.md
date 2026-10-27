@@ -250,7 +250,9 @@ internal/pipeline/
 internal/ids/                  workflow-id builders; a test pins them to the Python builders
 internal/installer/            I/O: POST install-server
 internal/config/               Config, validation, last-good on a bad update
-charts/herzi/                  Helm deployment, values, generated RBAC and alert rules
+charts/herzi/                  19-file package: metadata, defaults, schema, ignore, templates, rules
+hack/chart/                    example-values.yaml, monitoring-values.yaml, alerts.test.yaml
+docs/design/notes/             package implementation decisions and index
 ```
 
 ## Workflow ids

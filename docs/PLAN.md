@@ -87,7 +87,10 @@ internal/installer/            HTTP client of the install-server route          
 internal/temporalx/            slot sweep (Describe), failure types, queue pollers         (WP4)
 internal/metrics/              Prometheus metrics (names below)                           (controller WP)
 internal/controller/           reconciler, watches/mapping, annotations, recheck          (controller WP)
-charts/herzi/, Dockerfile, Makefile, .github/, docs/ops, test/crds                              (WP5)
+charts/herzi/                  19-file Helm package: metadata, defaults, schema, ignore, templates, rules (WP5)
+hack/chart/                    example-values.yaml, monitoring-values.yaml, alerts.test.yaml (WP5)
+docs/design/notes/             package implementation decisions and index
+Dockerfile, Makefile, .github/, docs/ops, test/crds                                            (WP5)
 ```
 
 ## Work packages and FILE OWNERSHIP
@@ -101,11 +104,11 @@ packages: `internal/pipeline/{types,ports,errors,stages}.go`, `internal/kube/typ
 | WP2 config | `internal/config/*.go` except `types.go`; `internal/config/testdata/` | `Defaults()`, `Load([]byte)` strict YAML with duration strings and unknown-key rejection, `(Config).ForPool/Manages/Validate`, `Store` (atomic last-good snapshot), tests |
 | WP3 kube + installer | `internal/kube/*.go` except `types.go`; `internal/kube/testdata/`; `internal/installer/` | parsers `ParseInfraEnv/ParseNodePool/ParseAgent` from `*unstructured.Unstructured`; the HTTP `Installer` with error classification; tests |
 | WP4 temporalx | `internal/temporalx/` | `Sweeper` (RunSweeper) and `Queues` (QueueChecker) over `go.temporal.io/sdk/client`; tests with the SDK mocks |
-| WP5 ops | `charts/herzi/`, `Dockerfile`, `Makefile`, `.github/`, `.golangci.yml`, `docs/ops/`, `test/crds/`, `README.md` | Helm chart, hardened Deployment, RBAC, ConfigMap sample, alerts, CI, container build, envtest CRD stubs, runbook |
+| WP5 ops | `charts/herzi/`, `hack/chart/`, `Dockerfile`, `Makefile`, `.github/`, `.golangci.yml`, `docs/ops/`, `test/crds/`, `README.md` | Helm chart, hardened Deployment, RBAC, ConfigMap sample, alerts, CI, container build, envtest CRD stubs, runbook |
 | WP6 controller (phase 2) | `cmd/`, `internal/controller/`, `internal/metrics/` | wiring, reconciler, mapping funcs, recheck, annotations, metrics, envtest suite |
 
 ## Rules for every agent
-1. Read `docs/design/herzi-design.md` Parts 1-3 first. Quote the design section you implement in the doc comment.
+1. Read `docs/design/herzi-design.md` Parts 1-3 first. Record implementation decisions and design references in `docs/design/notes/<package>.md`; follow the Comments policy in `AGENTS.md`.
 2. Build and test **only your own packages**: `go build ./internal/<pkg>/... && go test ./internal/<pkg>/...`.
    Never run `./...` (other packages may be mid-edit), never run `go mod tidy`, `go get` or `go mod edit`.
    If you need a module that is not in `go.mod`, do not add it: say so in your report.
@@ -113,8 +116,7 @@ packages: `internal/pipeline/{types,ports,errors,stages}.go`, `internal/kube/typ
    No Ginkgo outside envtest suites.
 4. `gofmt`, `go vet` clean. Errors are wrapped with `%w`. No `panic` outside tests. No global mutable state.
    Every external call takes a `context.Context` and honours its deadline. Log with the logr logger passed in.
-5. No TODO placeholders in delivered code. If something is unknowable from the repo, write it as an explicit
-   `// ASSUMPTION:` comment and list it in your report.
+5. No TODO placeholders in delivered code. If something is unknowable from the repo, record the assumption in `docs/design/notes/<package>.md` and list it in your report.
 6. Do NOT commit, do NOT push, do NOT touch git. Do NOT edit files you do not own.
 7. Final report: files written, what is tested, what is NOT tested, assumptions, anything that contradicts the design.
 

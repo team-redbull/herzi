@@ -15,15 +15,24 @@ charts/herzi/values.yaml            Deployment defaults and configuration
 charts/herzi/values.schema.json     Helm values validation
 charts/herzi/files/rbac-rules.yaml  Generated RBAC (DO NOT EDIT)
 charts/herzi/files/alerts.rules.yaml Native Prometheus rules
-charts/herzi/tests/alerts.test.yaml promtool cases
-charts/herzi/ci/*-values.yaml        Example Helm values
+hack/chart/alerts.test.yaml promtool cases
+hack/chart/*-values.yaml        Example Helm values
 hack/                              Build and verification helpers
+docs/design/notes/*.md             Package implementation decisions
 Makefile                           Build/test/deploy commands
 PROJECT                            Kubebuilder metadata (DO NOT EDIT manually)
 ```
 
 The API/webhook guidance below applies only if those features are added through
 the CLI in future; it does not describe current deployment requirements.
+
+## Comments
+
+Code carries only necessary comments: markers, the package line, contracts,
+invariants with a one-line why, and nolint reasons. Decisions and rationale live
+in docs; `docs/design/notes/<package>.md` holds implementation decisions moved
+out of code. Add or update a note when a change introduces a decision worth
+preserving; follow the [notes index](docs/design/notes/README.md).
 
 ## Critical Rules
 
@@ -153,7 +162,7 @@ make docker-build docker-push IMG="$IMG" VERSION=0.1.0 COMMIT=unknown
 make deploy VALUES=site-values.yaml IMG_REPO=registry.example.com/herzi IMG_TAG=0.1.0
 
 # 3. Test
-helm template herzi charts/herzi -f charts/herzi/ci/example-values.yaml
+helm template herzi charts/herzi -f hack/chart/example-values.yaml
 
 # 4. Debug
 kubectl logs -n herzi-system deployment/herzi -c manager -f
@@ -243,9 +252,12 @@ Generated code includes: status conditions (`metav1.Condition`), finalizers, own
 
 ### Helm Chart
 
-The deployment source of truth is `charts/herzi/README.md` and `charts/herzi/values.yaml`.
+The deployment contract is `charts/herzi/values.yaml`, `charts/herzi/values.schema.json`
+and `docs/ops/operating.md`. The packaged chart contains exactly 19 files: metadata,
+defaults, schema, `.helmignore`, 13 template/helper files and two rules files.
+Examples and alert tests live in `hack/chart/` outside the package.
 Copy the example values and replace hub identity, install endpoint, Temporal address,
-image repository and pools. Keep every pool at `dryRunGrow: true` initially. The
+image repository and pools. Pools start in dry run (`dryRunGrow` defaults to true); set it false per pool to go live. The
 chart renders the ConfigMap and validates required values before installation.
 It creates no Secrets, CRDs or Namespace templates. Helm can create the namespace;
 uninstall leaves that namespace and external Secrets intact. Pool and live timing

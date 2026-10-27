@@ -32,6 +32,7 @@ segmentQueue: segment
 agentNamespace: other
 interval: 9m
 reconcileTimeout: 30s
+defaults: {dryRunGrow: false}
 pools: {p: {}, q: {}}
 `
 
