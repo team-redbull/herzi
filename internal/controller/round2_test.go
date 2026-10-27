@@ -63,7 +63,7 @@ func TestF1SlowRecheckCannotSpendStaleSweep(t *testing.T) {
 	sweep := &invalidatingSweep{RunSweeper: f.sweep}
 	f.r.Sweeper = sweep
 	f.reconcile(t, "p")
-	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 3}}, f.install.requests)
+	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 2}}, f.install.requests) // target 12 at the 10% default
 	require.Equal(t, 1, sweep.invalidated)
 	f.r.markAttempt("p", base.Add(100*time.Millisecond))
 	f.now = base.Add(9 * time.Second)

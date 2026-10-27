@@ -36,21 +36,30 @@ At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above ta
 before considering failures or probes. Capacity is never reclaimed: lowering demand or
 the buffer only stops additions. Spare capacity can persist indefinitely.
 
-With `highPct: 30` and `minFree: 2`:
+With defaults `highPct: 10` and `minFree: 2`:
 
 | Demand | Rounded percentage | Buffer | Target |
 |---:|---:|---:|---:|
 | 0 | 0 | 2 | 2 |
-| 4 | 1 | 2 | 6 |
-| 6 | 2 | 2 | 8 |
-| 10 | 3 | 3 | 13 |
-| 12 | 4 | 4 | 16 |
-| 20 | 6 | 6 | 26 |
-| 50 | 15 | 15 | 65 |
+| 4 | 0 | 2 | 6 |
+| 6 | 1 | 2 | 8 |
+| 10 | 1 | 2 | 12 |
+| 12 | 1 | 2 | 14 |
+| 20 | 2 | 2 | 22 |
+| 24 | 2 | 2 | 26 |
+| 25 | 3 | 3 | 28 |
+| 30 | 3 | 3 | 33 |
+| 50 | 5 | 5 | 55 |
+| 100 | 10 | 10 | 110 |
 
-The default target buffer intentionally doubles from 15% to 30%: demand 20 previously
-had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
-to retain the old target behavior. The `minFree` floor still protects small pools.
+The default target buffer is now 10%, lower than the former 15% for large pools
+and equal to the `minFree` floor for small ones. Demand 20 previously had three spare
+machines (target 23); now it has two (target 22), the floor. With integer half-up
+rounding, the floor decides the buffer through demand 24; the percentage takes over
+at demand 25: `(10*25+50)/100 = 3`. Set `highPct: 15` explicitly to retain the former
+target behavior. To raise the buffer, set an explicit `highPct: 30` or increase
+`minFree`. Because the controller never removes servers, a larger buffer adds
+permanent capacity. Capacity is never reclaimed.
 
 Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
 must be non-negative). Invalid defaults reject the document; invalid merged pool
@@ -71,28 +80,28 @@ calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot
 ## Worked cases
 
 ### 1. Steady state
-Demand 10, assigned 10, claimable 3. Target 13, supply 13. **Nothing to do. The controller stays silent.**
+Demand 10, assigned 10, claimable 2. Target 12, supply 12. **Nothing to do. The controller stays silent.**
 
 ### 2. A tenant scales up
-Demand goes 10 → 16, with 10 assigned and 3 free. New buffer is 5, target 21.
+Demand goes 10 → 16, with 10 assigned and 2 free. New buffer is 2, target 18.
 
 ```
-10:00  the NodePool claims the 3 spares: assigned 13, claimable 0 → supply 13, need 8
-10:00  controller orders 8 machines (one request of count=8)
-10:02  8 runs open → supply 21, need 0 → Hold (at or above target)
-10:25  runs finish, Agents appear; tenant claims 3 more, leaving claimable 5 → buffer rebuilt
+10:00  the NodePool claims the 2 spares: assigned 12, claimable 0 → supply 12, need 6
+10:00  controller orders 6 machines (one request of count=6)
+10:02  6 runs open → supply 18, need 0 → Hold (at or above target)
+10:25  runs finish, Agents appear; tenant claims 4 more, leaving claimable 2 → buffer rebuilt
 ```
 
-The tenant got 3 machines immediately. The other 3 wait for installs; five rebuild the buffer.
+The tenant got 2 machines immediately. The other 4 wait for installs; two rebuild the buffer.
 
 ### 3. A very large scale-up
-An empty pool, demand 0 → 50. Target 65. The controller never has more than 15 runs open per pool
+An empty pool, demand 0 → 50. Target 55. The controller never has more than 15 runs open per pool
 (a load limit) and the API takes at most 20 per request.
 
 ```
-10:00  need 65 → order 15
+10:00  need 55 → order 15
 10:20  10 runs done: supply 10 Agents + 5 open → order 10 more (headroom 10)
-...    about 5 waves; each pass orders only what is still missing
+...    about 4 waves; each pass orders only what is still missing
 ```
 
 It never re-orders what is already in flight: open runs are subtracted every time.
@@ -102,8 +111,8 @@ Demand 20 → 4. 16 Agents are released. They reboot into the discovery image fo
 wiped before they register as free.
 
 ```
-10:00  assigned 4, claimable 6, settling 16 (the rebooting ones) → supply 26
-10:10  tenant scales to 12 → target 16, supply 26 → need -10 → no order
+10:00  assigned 4, claimable 2, settling 16 (the rebooting ones) → supply 22
+10:10  tenant scales to 12 → target 14, supply 22 → need -8 → no order
 10:21  the 16 return as claimable
 ```
 
@@ -405,7 +414,7 @@ func Validate(f PoolFacts, raw RawSnapshot, cfg Config) Verdict {
 ```go
 func Decide(f PoolFacts, cfg Config, now time.Time) Intent {
     p       := cfg.ForPool(string(f.Key))              // defaults with this pool's overrides merged in
-    buffer := max(p.MinFree, (p.HighPct*f.Demand + 50) / 100) // integer half-up
+    buffer := max(p.MinFree, (p.HighPct*f.Demand + 50) / 100) // integer half-up; defaults: HighPct=10, MinFree=2
     target := f.Demand + buffer
     need   := target - (f.Assigned + f.Claimable + f.Settling + len(f.Open))
     if need <= 0 { return Hold{f.Key, HoldAtOrAboveTarget} } // "at or above target"
@@ -520,7 +529,7 @@ stuckAfter: 2h                      # an open run older than this => alert only
 
 # ---- pool settings: defaults, overridable per pool ----
 defaults:
-  highPct: 30
+  highPct: 10
   minFree: 2
   maxOpenRunsPerPool: 15
   probeInterval: 20m                # server-scan refreshes about every 15 min
@@ -534,7 +543,7 @@ defaults:
 pools:
   "32-128-zone-1": { minFree: 5, maxOpenRunsPerPool: 8 }
   "16-64-zone-2":  { paused: true }
-  "8-32-zone-1":   { highPct: 25, dryRunGrow: true }
+  "8-32-zone-1":   { highPct: 25, dryRunGrow: true } # explicit percentage override
 ```
 
 **Merge rule.** For a pool, each field takes the pool's value if it is written, otherwise the default.
@@ -573,7 +582,7 @@ retaining the last good configuration. Invalid values of supported keys in merge
 instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
 Deploy the migrated config with the new image. Rollback requires the matching old config
 as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
-`highPct: 15` explicitly for the former target buffer; the new default remains 30.
+`highPct: 15` explicitly for the former target buffer; the new default is 10.
 
 `minFree` is the operator's to size: the largest scale request to absorb without a wait, plus the surge of
 any pool still using `upgradeType: Replace`. A pool can also be paused with an annotation on the InfraEnv,
@@ -605,7 +614,7 @@ The decision uses signed need; `herzi_pool_need` reports `max(0, need)`.
 ## Test table for Decide
 
 Each custom-buffer row uses `highPct: 0, minFree: <buffer>`; the demand-50 row
-uses defaults (`highPct: 30, minFree: 2`). Probe rows use the default timings.
+uses defaults (`highPct: 10, minFree: 2`). Probe rows use the default timings.
 Validation runs first; unmanaged or blocked pools never order.
 
 | demand | assigned | claimable | settling | open | recent evidence | buffer | expect |
@@ -628,7 +637,7 @@ Validation runs first; unmanaged or blocked pools never order.
 | 6 | 0 | 0 | 0 | 0 | capacity fail 30 min ago; Completed run started before failure | 2 | Grow 1 Probe |
 | 6 | 0 | 0 | 0 | 0 | 2 distinct other failures since success | 2 | Grow 8 Full |
 | 6 | 0 | 0 | 0 | 0 | 3 distinct other failures since success | 2 | Grow 1 Probe |
-| 50 | 0 | 0 | 0 | 0 | – | 15 (default) | Grow 65 Full → Plan one request of 15 |
+| 50 | 0 | 0 | 0 | 0 | – | 5 (default) | Grow 55 Full → Plan one request of 15 |
 | 9 | 12 | 0 | 0 | 0 | – | 2 | Hold; sustained assigned > demand alerts |
 | 6 | 6 | 1 | 0 | 0 | – | 2 | Grow 1 Full (target − 1) |
 | 6 | 6 | 2 | 0 | 0 | – | 2 | Hold (target equality) |
@@ -638,8 +647,8 @@ Validation runs first; unmanaged or blocked pools never order.
 Additional coverage: zero buffer (`highPct: 0, minFree: 0`); exact-half rounding
 (demand 5, `highPct: 10, minFree: 0` gives target 6); and at/above target Holds
 for every supply composition, including failure evidence. Under defaults,
-demand 20 / assigned 18 / claimable 3 orders 5 toward target 26; even assigned 21
-with no other supply needs 5. More supply never increases the order count.
+demand 20 / assigned 18 / claimable 3 orders 1 toward target 22; even assigned 21
+with no other supply needs 1. More supply never increases the order count.
 
 ---
 
@@ -652,7 +661,7 @@ with no other supply needs 5. More supply never increases the order count.
 | 1 | Duplicate orders (additive POST, visibility lag, lost reply) | order 12, reply lost, next pass orders 12 again → 34 for a target of 22 | The sweep Describes all 100 fixed slots, subtracts open runs, and cannot be reused after an attempt. A pre-POST marker survives cancellation/restart; uncertain outcomes extend it from outcome time. Rare remote-request residual accepted |
 | 2 | No leader election | two replicas each order 12 | Lease election; one replica. No fencing: accepted |
 | 3 | Stale or partial reads | cached Agents empty → orders again | Errors block the pool; `Recheck` re-reads uncached and re-validates before ordering |
-| 4 | `count` > 20 gives 422 forever | need 65 → 422 every pass | Plan caps each request at 20, waves for big deficits |
+| 4 | `count` > 20 gives 422 forever | need 55 → 422 every pass | Plan caps each request at 20, waves for big deficits |
 | 5 | Slots shared across hubs | other hub's runs counted as ours | MCE in the id (workflows PR #12) |
 | 6 | Spare may not match the NodePool selector | red/blue example | Not real here: selectors are only the InfraEnv label; any other selector blocks that pool |
 | 7 | Unlabeled Agents vanish | 4 of 12 uncounted → over-order | Warning and metric; never blocks another pool |

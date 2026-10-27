@@ -1,3 +1,5 @@
+> **2026-10-27:** The owner later changed the default `highPct` to 10; this historical plan’s tables show 30.
+
 > **Reviewed change specification / historical planning record.** Implementation status, line numbers, former behavior and open-question wording below record the planning pass. Owner rollout decision: previous-ID runs are not accounted for; every pool starts in dry run and real growth may begin only after verifying none remain open. The [current design](../design/herzi-design.md) and [operating guide](../ops/operating.md) describe the implemented contract. Retired terms below exist only to specify their migration and deletion.
 
 # Plan: add-only controller and the merged workflow ids

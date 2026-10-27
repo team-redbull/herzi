@@ -506,11 +506,50 @@ func assertHighPctTarget(t *testing.T, assigned, claimable int) {
 		}
 		objects = append(objects, a)
 	}
-	f := setup(t, testConfig(), objects...)
+	// The percentage path is exercised with an EXPLICIT 30%: with the 10% default the minFree floor of 2
+	// decides the buffer up to demand 24, so demand 20 would not show the percentage at all.
+	cfg := testConfig()
+	cfg.Defaults.HighPct = 30
+	f := setup(t, cfg, objects...)
 	f.reconcile(t, "p")
 	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 5}}, f.install.requests)
 	require.Equal(t, 26.0, metric(t, f.reg, "herzi_pool_target", nil))
 	require.Equal(t, 5.0, metric(t, f.reg, "herzi_pool_need", nil))
 	require.Equal(t, float64(assigned), metric(t, f.reg, "herzi_pool_assigned", nil))
 	require.Equal(t, float64(claimable), metric(t, f.reg, "herzi_pool_claimable", nil))
+}
+
+// The shipped default is highPct 10 with a minFree floor of 2: the floor decides the buffer up to demand 24 and the
+// percentage takes over from demand 25. These are literal numbers, not computed with pipeline.Target.
+func TestDefaultBufferIsTheFloorUntilDemand25(t *testing.T) {
+	for _, tc := range []struct {
+		demand, assigned, claimable int
+		wantTarget, wantNeed        float64
+		wantOrder                   int
+	}{
+		{demand: 20, assigned: 18, claimable: 3, wantTarget: 22, wantNeed: 1, wantOrder: 1},
+		{demand: 24, assigned: 24, claimable: 2, wantTarget: 26, wantNeed: 0, wantOrder: 0},
+		{demand: 25, assigned: 25, claimable: 2, wantTarget: 28, wantNeed: 1, wantOrder: 1},
+		{demand: 50, assigned: 50, claimable: 0, wantTarget: 55, wantNeed: 5, wantOrder: 5},
+	} {
+		t.Run(fmt.Sprintf("demand %d", tc.demand), func(t *testing.T) {
+			objects := []client.Object{infra("p"), node("workers", "p", int64(tc.demand))}
+			for i := 0; i < tc.assigned+tc.claimable; i++ {
+				a := agent(fmt.Sprint(i), "p")
+				if i < tc.assigned {
+					require.NoError(t, unstructured.SetNestedMap(a.Object, map[string]any{"name": "cluster"}, "spec", "clusterDeploymentName"))
+				}
+				objects = append(objects, a)
+			}
+			f := setup(t, testConfig(), objects...) // testConfig uses config.Defaults()
+			f.reconcile(t, "p")
+			require.Equal(t, tc.wantTarget, metric(t, f.reg, "herzi_pool_target", nil))
+			require.Equal(t, tc.wantNeed, metric(t, f.reg, "herzi_pool_need", nil))
+			if tc.wantOrder == 0 {
+				require.Empty(t, f.install.requests)
+				return
+			}
+			require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: tc.wantOrder}}, f.install.requests)
+		})
+	}
 }

@@ -88,6 +88,7 @@ var _ = Describe("Inventory watches", func() {
 		}
 		deleteAfterSpec(agent("one", "p"), agent("two", "p"), infra("p"), node("workers", "p", 0))
 		initial := testConfig()
+		initial.Defaults.HighPct = 30       // explicit: with the 10% default the floor of 2 would decide every step below
 		initial.Interval = 10 * time.Minute // must stay <= probeInterval or the pool is config_invalid
 		store := config.NewStore(initial)
 		reload := make(chan event.GenericEvent, 10)

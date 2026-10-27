@@ -62,3 +62,23 @@ func TestTheShippedSampleUsesTheRealQueueNames(t *testing.T) {
 		t.Fatalf("sample queue names are wrong: %q %q", cfg.SegmentQueue, cfg.WorkflowQueue)
 	}
 }
+
+// The owner's default buffer is 10% with a floor of two machines. This pins it, and pins that the shipped sample
+// states the same defaults, so the documented numbers cannot drift from the code unnoticed.
+func TestDefaultBufferIsTenPercentWithAFloorOfTwo(t *testing.T) {
+	defaults := config.Defaults()
+	if defaults.HighPct != 10 || defaults.MinFree != 2 {
+		t.Fatalf("defaults are highPct %d minFree %d, want 10 and 2", defaults.HighPct, defaults.MinFree)
+	}
+	data, err := os.ReadFile("../../config/samples/herzi-config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Defaults != defaults {
+		t.Fatalf("the shipped sample's defaults differ from config.Defaults():\n sample %+v\n code   %+v", cfg.Defaults, defaults)
+	}
+}

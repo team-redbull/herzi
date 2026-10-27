@@ -14,7 +14,7 @@ activityQueue: server-lifecycle-activity-ocp4-example
 workflowQueue: install-server-workflow
 segmentQueue: segment-lifecycle-activity
 defaults:
-  highPct: 30
+  highPct: 10
   minFree: 2
   maxOpenRunsPerPool: 15
   probeInterval: "20m"

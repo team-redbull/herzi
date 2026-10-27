@@ -57,7 +57,7 @@ type PoolOverride struct {
 //
 //	interval: 120s
 //	hubName: ocp4-bat-yam-01
-//	defaults: {highPct: 30, ...}
+//	defaults: {highPct: 10, ...}
 //	pools: {"32-128-zone-1": {minFree: 5}}
 //
 // Durations are strings ("20m"). The methods (ForPool, Manages, Validate) and the strict loader

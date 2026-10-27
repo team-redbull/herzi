@@ -118,7 +118,7 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | activityQueue | server-lifecycle-activity-<hubName> | Hub | Hub activity queue, derived from hubName when not written |
 | workflowQueue | install-server-workflow | Hub | Install workflow queue |
 | segmentQueue | segment-lifecycle-activity | Hub | Segment activity queue |
-| highPct | 30 | Pool | Single target buffer percentage, integer half-up rounding |
+| highPct | 10 | Pool | Single target buffer percentage, integer half-up rounding |
 | minFree | 2 | Pool | Minimum spare buffer; include Replace upgrade surge |
 | maxOpenRunsPerPool | 15 | Pool | Concurrent install load cap, at most maxSlots |
 | probeInterval | 20m | Pool | Minimum interval between capacity probes |
@@ -173,7 +173,7 @@ retaining the last good configuration. Invalid values of supported keys in merge
 instead publish with `PoolErrors` and block only those pools (`reason="config_invalid"`).
 Deploy the migrated config with the new image. Rollback requires the matching old config
 as well as the old image; rollout undo alone does not restore ConfigMaps. Choose
-`highPct: 15` explicitly for the former target buffer; the new default remains 30.
+`highPct: 15` explicitly for the former target buffer; the new default is 10.
 
 ## Decision table
 
@@ -193,21 +193,30 @@ At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above ta
 before considering failures or probes. Capacity is never reclaimed: lowering demand or
 the buffer only stops additions. Spare capacity can persist indefinitely.
 
-With `highPct: 30` and `minFree: 2`:
+With defaults `highPct: 10` and `minFree: 2`:
 
 | Demand | Rounded percentage | Buffer | Target |
 |---:|---:|---:|---:|
 | 0 | 0 | 2 | 2 |
-| 4 | 1 | 2 | 6 |
-| 6 | 2 | 2 | 8 |
-| 10 | 3 | 3 | 13 |
-| 12 | 4 | 4 | 16 |
-| 20 | 6 | 6 | 26 |
-| 50 | 15 | 15 | 65 |
+| 4 | 0 | 2 | 6 |
+| 6 | 1 | 2 | 8 |
+| 10 | 1 | 2 | 12 |
+| 12 | 1 | 2 | 14 |
+| 20 | 2 | 2 | 22 |
+| 24 | 2 | 2 | 26 |
+| 25 | 3 | 3 | 28 |
+| 30 | 3 | 3 | 33 |
+| 50 | 5 | 5 | 55 |
+| 100 | 10 | 10 | 110 |
 
-The default target buffer intentionally doubles from 15% to 30%: demand 20 previously
-had three spare machines (target 23), now six (target 26). Set `highPct: 15` explicitly
-to retain the old target behavior. The `minFree` floor still protects small pools.
+The default target buffer is now 10%, lower than the former 15% for large pools
+and equal to the `minFree` floor for small ones. Demand 20 previously had three spare
+machines (target 23); now it has two (target 22), the floor. With integer half-up
+rounding, the floor decides the buffer through demand 24; the percentage takes over
+at demand 25: `(10*25+50)/100 = 3`. Set `highPct: 15` explicitly to retain the former
+target behavior. To raise the buffer, set an explicit `highPct: 30` or increase
+`minFree`. Because the controller never removes servers, a larger buffer adds
+permanent capacity. Capacity is never reclaimed.
 
 Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
 must be non-negative). Invalid defaults reject the document; invalid merged pool
@@ -217,7 +226,7 @@ arithmetic is checked even for inputs outside these limits: an unrepresentable
 calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot grow.
 
 Each custom-buffer row uses `highPct: 0, minFree: <buffer>`; the demand-50 row
-uses defaults (`highPct: 30, minFree: 2`). Probe rows use the default timings.
+uses defaults (`highPct: 10, minFree: 2`). Probe rows use the default timings.
 Validation runs first; unmanaged or blocked pools never order.
 
 | demand | assigned | claimable | settling | open | recent evidence | buffer | expect |
@@ -240,7 +249,7 @@ Validation runs first; unmanaged or blocked pools never order.
 | 6 | 0 | 0 | 0 | 0 | capacity fail 30 min ago; Completed run started before failure | 2 | Grow 1 Probe |
 | 6 | 0 | 0 | 0 | 0 | 2 distinct other failures since success | 2 | Grow 8 Full |
 | 6 | 0 | 0 | 0 | 0 | 3 distinct other failures since success | 2 | Grow 1 Probe |
-| 50 | 0 | 0 | 0 | 0 | – | 15 (default) | Grow 65 Full → Plan one request of 15 |
+| 50 | 0 | 0 | 0 | 0 | – | 5 (default) | Grow 55 Full → Plan one request of 15 |
 | 9 | 12 | 0 | 0 | 0 | – | 2 | Hold; sustained assigned > demand alerts |
 | 6 | 6 | 1 | 0 | 0 | – | 2 | Grow 1 Full (target − 1) |
 | 6 | 6 | 2 | 0 | 0 | – | 2 | Hold (target equality) |
@@ -250,8 +259,8 @@ Validation runs first; unmanaged or blocked pools never order.
 Additional coverage: zero buffer (`highPct: 0, minFree: 0`); exact-half rounding
 (demand 5, `highPct: 10, minFree: 0` gives target 6); and at/above target Holds
 for every supply composition, including failure evidence. Under defaults,
-demand 20 / assigned 18 / claimable 3 orders 5 toward target 26; even assigned 21
-with no other supply needs 5. More supply never increases the order count.
+demand 20 / assigned 18 / claimable 3 orders 1 toward target 22; even assigned 21
+with no other supply needs 1. More supply never increases the order count.
 
 
 ## Metrics

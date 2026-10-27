@@ -197,13 +197,13 @@ kubectl -n herzi-system logs deployment/herzi -c manager --since=30m
 
 Compare the mounted ConfigMap with the intended config; fix unknown keys, duration strings and merged constraints. Reapply the ConfigMap and confirm herzi_config_valid returns to 1. Invalid supported settings in a merged pool publish with healthy changes and block only that pool (`reason="config_invalid"`); they do not reject the document. Validate `maxSlots == 100`, `1 <= maxOpenRunsPerPool <= 100`, nonnegative highPct/minFree, positive durations, `failureMemory >= 2*probeInterval`, `interval <= probeInterval`, `settlingMax >= probeInterval`, and `drawGrace < probeInterval`, including defaults and each merged pool.
 
-For migration errors, delete `lowPct` and `minBand` from defaults and every override, including zero/null values. The diagnostics are `defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct` and `pools.<name>.minBand was removed: the controller no longer has a ceiling; delete minBand`. These obsolete keys reject the whole document. Apply the migrated configuration with the new image; rollback requires the matching old configuration. Set `highPct: 15` for the former target buffer, or retain the new default 30.
+For migration errors, delete `lowPct` and `minBand` from defaults and every override, including zero/null values. The diagnostics are `defaults.lowPct was removed: use highPct as the single target buffer percentage; delete lowPct` and `pools.<name>.minBand was removed: the controller no longer has a ceiling; delete minBand`. These obsolete keys reject the whole document. Apply the migrated configuration with the new image; rollback requires the matching old configuration. Set `highPct: 15` for the former target buffer, or use the new default 10.
 
 <a id="assigned-exceeds-demand"></a>
 
 ## HerziAssignedExceedsDemand
 
-Assigned Agents have exceeded active NodePool demand for three hours, suggesting orphaned bindings. This is an investigation signal, not proof. Free claimable/settling spare capacity alone does not fire this alert: the controller only adds servers and capacity is never reclaimed. Lowering demand or the buffer only stops additions. Even assigned 21 at demand 20 can still need five additions toward the default target 26.
+Assigned Agents have exceeded active NodePool demand for three hours, suggesting orphaned bindings. This is an investigation signal, not proof. Free claimable/settling spare capacity alone does not fire this alert: the controller only adds servers and capacity is never reclaimed. Lowering demand or the buffer only stops additions. Even assigned 21 at demand 20 can still need one addition toward the default target 22.
 
 Confirm with the common kubectl/log commands and these exact PromQL queries:
 
