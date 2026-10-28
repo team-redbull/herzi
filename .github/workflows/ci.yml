@@ -5,10 +5,56 @@ on:
   pull_request:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 permissions:
   contents: read
 jobs:
+  fmt-vet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/go
+        with:
+          scope: plain
+      - run: make fmt vet
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/go
+        with:
+          scope: plain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/golangci-lint
+          key: tool-golangci-lint-${{ runner.os }}-${{ runner.arch }}-v2.15.0-go${{ hashFiles('go.mod') }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-analysis-${{ runner.os }}-${{ github.sha }}
+          restore-keys: golangci-analysis-${{ runner.os }}-
+      - run: make lint
+  vuln:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/go
+        with:
+          scope: plain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/govulncheck
+          key: tool-govulncheck-${{ runner.os }}-${{ runner.arch }}-v1.9.0-go${{ hashFiles('go.mod') }}
+      - run: make vuln
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -16,11 +62,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+      - uses: ./.github/actions/go
         with:
-          go-version-file: go.mod
-          cache: true
-      - run: make fmt vet lint test vuln
+          scope: race
+      - run: make test
       - name: Enforce core unit coverage of at least 90 percent
         shell: bash
         run: |
@@ -37,10 +82,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+      - uses: ./.github/actions/go
         with:
-          go-version-file: go.mod
-          cache: true
+          scope: race
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            bin/setup-envtest
+            bin/k8s
+          key: tool-envtest-${{ runner.os }}-${{ runner.arch }}-v0.25.0-k8s1.37.0-go${{ hashFiles('go.mod') }}
       - run: make test-integration
   chart:
     runs-on: ubuntu-latest
@@ -49,10 +99,13 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+      - uses: ./.github/actions/go
         with:
-          go-version-file: go.mod
-          cache: true
+          scope: plain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/controller-gen
+          key: tool-controller-gen-${{ runner.os }}-${{ runner.arch }}-v0.22.0-go${{ hashFiles('go.mod') }}
       - name: Install Helm (pinned, checksum-verified)
         run: |
           set -euo pipefail
@@ -79,17 +132,43 @@ jobs:
       - name: Verify deployment chart and hack/chart fixtures
         run: make helm-lint helm-test test-alerts manifests-drift
   image:
+    name: Image build (cache warm-up)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_tag: ${{ steps.version.outputs.version_tag }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          fetch-depth: ${{ github.ref == 'refs/heads/main' && 0 || 1 }}
           persist-credentials: false
-      - run: make docker-build IMG=herzi:ci VERSION=ci COMMIT="$GITHUB_SHA"
+
+      - name: Determine next version from Conventional Commits
+        id: version
+        if: github.ref == 'refs/heads/main'
+        uses: PaulHatch/semantic-version@9f72830310d5ed81233b641ee59253644cd8a8fc # v6.0.2
+        with:
+          tag_prefix: "v"
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build (never pushes) and warm the cache
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          build-args: |
+            VERSION=${{ steps.version.outputs.version || 'ci' }}
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=herzi
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,scope=herzi,mode=max' || '' }}
+
   publish:
     name: Publish image (GHCR)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [unit, integration, chart, image]
+    needs: [fmt-vet, lint, vuln, unit, integration, chart, image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -98,22 +177,14 @@ jobs:
     permissions:
       contents: write
       packages: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
-      - name: Determine next version from Conventional Commits
-        id: version
-        uses: PaulHatch/semantic-version@9f72830310d5ed81233b641ee59253644cd8a8fc # v6.0.2
-        with:
-          tag_prefix: "v"
-
       - name: Verify the computed version moves forward
         env:
-          NEW_TAG: ${{ steps.version.outputs.version_tag }}
+          NEW_TAG: ${{ needs.image.outputs.version_tag }}
         run: |
           set -euo pipefail
           previous="$(git tag --list 'v*' --sort=-v:refname | head -1)"
@@ -133,7 +204,7 @@ jobs:
 
       - name: Tag the release
         env:
-          NEW_TAG: ${{ steps.version.outputs.version_tag }}
+          NEW_TAG: ${{ needs.image.outputs.version_tag }}
         run: |
           set -euo pipefail
           if git rev-parse -q --verify "refs/tags/$NEW_TAG" >/dev/null; then
@@ -146,7 +217,7 @@ jobs:
 
       - name: Publish the release notes
         env:
-          NEW_TAG: ${{ steps.version.outputs.version_tag }}
+          NEW_TAG: ${{ needs.image.outputs.version_tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -207,9 +278,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.version.outputs.version_tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version_tag }}
-            type=semver,pattern={{major}},value=${{ steps.version.outputs.version_tag }}
+            type=semver,pattern={{version}},value=${{ needs.image.outputs.version_tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.image.outputs.version_tag }}
+            type=semver,pattern={{major}},value=${{ needs.image.outputs.version_tag }}
             type=raw,value=latest
             type=sha,prefix=sha-
 
@@ -220,9 +291,9 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ needs.image.outputs.version }}
             COMMIT=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=herzi
+          cache-to: type=gha,scope=herzi,mode=max

@@ -1,13 +1,13 @@
 FROM golang:1.27.3 AS builder
 ARG TARGETOS=linux
 ARG TARGETARCH
-ARG VERSION=dev
-ARG COMMIT=unknown
 WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
+ARG VERSION=dev
+ARG COMMIT=unknown
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o /out/manager ./cmd
 
 FROM gcr.io/distroless/static:nonroot

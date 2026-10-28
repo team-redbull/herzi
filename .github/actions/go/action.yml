@@ -1,0 +1,40 @@
+name: Go toolchain with caches
+description: setup-go plus module and build caches; main saves a fresh build cache every run, other refs only restore.
+inputs:
+  scope:
+    description: Build cache scope; jobs with different compile flags (race or not) must not share one.
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: go
+      uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+      with:
+        go-version-file: go.mod
+        cache: false
+    - id: paths
+      shell: bash
+      run: |
+        echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.mod }}
+        key: gomod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+        restore-keys: gomod-${{ runner.os }}-${{ runner.arch }}-
+    - if: github.ref == 'refs/heads/main'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        key: gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-
+          gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+    - if: github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        key: gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-none
+        restore-keys: |
+          gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-
+          gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
