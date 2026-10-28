@@ -32,12 +32,14 @@ namespace. Confirm these network paths from the hub before enabling growth.
 
 ### 2. Build and publish an immutable image
 
-Every push to `main` that passes CI publishes the image and tags the commit (the `publish` job in
-`.github/workflows/ci.yml`). The version comes from the Conventional Commit messages since the last `vX.Y.Z` tag
-(`hack/next-version.sh`): `feat!:` or a `BREAKING CHANGE:` line bumps the major, `feat:` the minor, and anything
-else (`fix:`, `docs:`, `ci:`, `chore:` ...) the patch. The first release is `0.0.1`/`0.1.0`, depending on the commits.
-Images: `ghcr.io/team-redbull/herzi:<X.Y.Z>`, `:sha-<12-char commit>` and `:latest`; git tag `v<X.Y.Z>`.
-Deploy the version tag (`--set image.repository=ghcr.io/team-redbull/herzi --set image.tag=<X.Y.Z>`); the package
+Every push to `main` that passes CI tags a release, publishes release notes and pushes the image (the `publish` job in
+`.github/workflows/ci.yml`, the same pipeline as server_scan). The version comes from the Conventional Commit subjects
+since the last `vX.Y.Z` tag: `feat!:` or a `BREAKING CHANGE:` footer bumps the major, `feat:` the minor, anything else
+(`fix:`, `docs:`, `ci:`, `chore:` ...) the patch. The job refuses a version that already exists on another commit or
+does not move forward. The GitHub release lists the subjects under Breaking, New features, Fixed, Performance and
+Documentation.
+Images: `ghcr.io/team-redbull/herzi:<X.Y.Z>`, `:<X.Y>`, `:<X>`, `:sha-<commit>` and `:latest`.
+Deploy a full version (`--set image.repository=ghcr.io/team-redbull/herzi --set image.tag=<X.Y.Z>`); the package
 must be readable by the cluster, or add an `imagePullSecret`. To build by hand instead:
 
 For a registry you can push to (replace the example repository and tag):

@@ -87,45 +87,142 @@ jobs:
           persist-credentials: false
       - run: make docker-build IMG=herzi:ci VERSION=ci COMMIT="$GITHUB_SHA"
   publish:
+    name: Publish image (GHCR)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [unit, integration, chart, image]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     concurrency:
       group: publish
       cancel-in-progress: false
     permissions:
       contents: write
       packages: write
-    env:
-      IMAGE: ghcr.io/team-redbull/herzi
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          fetch-tags: true
-      - name: Next version from Conventional Commits
+
+      - name: Determine next version from Conventional Commits
         id: version
-        run: echo "value=$(hack/next-version.sh)" >> "$GITHUB_OUTPUT"
-      - name: Log in to ghcr.io
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: Build and push
+        uses: PaulHatch/semantic-version@9f72830310d5ed81233b641ee59253644cd8a8fc # v6.0.2
+        with:
+          tag_prefix: "v"
+
+      - name: Verify the computed version moves forward
         env:
-          VERSION: ${{ steps.version.outputs.value }}
+          NEW_TAG: ${{ steps.version.outputs.version_tag }}
         run: |
           set -euo pipefail
-          make docker-build IMG="$IMAGE:$VERSION" VERSION="$VERSION" COMMIT="$GITHUB_SHA"
-          docker tag "$IMAGE:$VERSION" "$IMAGE:sha-${GITHUB_SHA::12}"
-          docker tag "$IMAGE:$VERSION" "$IMAGE:latest"
-          docker push "$IMAGE:$VERSION"
-          docker push "$IMAGE:sha-${GITHUB_SHA::12}"
-          docker push "$IMAGE:latest"
+          previous="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          echo "previous tag: ${previous:-<none>}  ->  computed: $NEW_TAG"
+          if [ -z "$NEW_TAG" ]; then
+            echo "::error::version step produced an empty tag"; exit 1
+          fi
+          if existing="$(git rev-parse -q --verify "refs/tags/$NEW_TAG^{commit}")"; then
+            if [ "$existing" != "$(git rev-parse HEAD)" ]; then
+              echo "::error::$NEW_TAG already exists on ${existing:0:7} - refusing to re-tag"; exit 1
+            fi
+            echo "$NEW_TAG already points at this commit - re-run, keeping it"
+          fi
+          if [ -n "$previous" ] && [ "$(printf '%s\n%s\n' "$previous" "$NEW_TAG" | sort -V | tail -1)" != "$NEW_TAG" ]; then
+            echo "::error::$NEW_TAG is not newer than $previous"; exit 1
+          fi
+
       - name: Tag the release
         env:
-          VERSION: ${{ steps.version.outputs.value }}
+          NEW_TAG: ${{ steps.version.outputs.version_tag }}
         run: |
           set -euo pipefail
-          if [ -z "$(git tag --points-at HEAD --list 'v*')" ]; then
-            git tag "v$VERSION"
-            git push origin "v$VERSION"
+          if git rev-parse -q --verify "refs/tags/$NEW_TAG" >/dev/null; then
+            echo "$NEW_TAG already exists - re-run, not re-tagging"; exit 0
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_TAG" -m "$NEW_TAG"
+          git push origin "$NEW_TAG"
+
+      - name: Publish the release notes
+        env:
+          NEW_TAG: ${{ steps.version.outputs.version_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 "$NEW_TAG^" 2>/dev/null || true)"
+          if [ -n "$previous" ]; then range="$previous..$NEW_TAG"; else range="$NEW_TAG"; fi
+          git log --no-merges --format=%s "$range" > "$RUNNER_TEMP/subjects.txt"
+          python3 - "$NEW_TAG" "$previous" "$RUNNER_TEMP/subjects.txt" > "$RUNNER_TEMP/notes.md" <<'PY'
+          import pathlib, re, sys
+
+          tag, previous, subjects = sys.argv[1], sys.argv[2], sys.argv[3]
+          pattern = re.compile(r"^(?P<type>[a-z]+)(?P<scope>\([^)]*\))?(?P<bang>!)?: (?P<rest>.+)$")
+          headings = {"breaking": "Breaking", "feat": "New features", "fix": "Fixed",
+                      "perf": "Performance", "docs": "Documentation"}
+          groups, other = {}, []
+          for line in (l.strip() for l in pathlib.Path(subjects).read_text().splitlines()):
+              if not line:
+                  continue
+              m = pattern.match(line)
+              if not m:
+                  other.append(line)
+                  continue
+              key = "breaking" if m["bang"] else m["type"]
+              if key in headings:
+                  groups.setdefault(key, []).append(m["rest"])
+          out = []
+          for key, heading in headings.items():
+              if groups.get(key):
+                  out += [f"### {heading}\n"] + [f"- {i}" for i in groups[key]] + [""]
+          if other:
+              out += ["### Other\n"] + [f"- {i}" for i in other] + [""]
+          if not out:
+              out = ["No operator-visible changes in this release.", ""]
+          if previous:
+              out.append(f"**Full changelog:** {previous}...{tag}")
+          print("\n".join(out))
+          PY
+          cat "$RUNNER_TEMP/notes.md"
+          for attempt in 1 2 3; do
+            if gh release view "$NEW_TAG" >/dev/null 2>&1; then echo "release exists"; break; fi
+            gh release create "$NEW_TAG" --title "$NEW_TAG" --notes-file "$RUNNER_TEMP/notes.md" && break
+            if [ "$attempt" = 3 ]; then echo "::error::could not create release $NEW_TAG"; exit 1; fi
+            sleep 30
+          done
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.version_tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version_tag }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version_tag }}
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            COMMIT=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
