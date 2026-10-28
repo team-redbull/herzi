@@ -32,6 +32,11 @@ namespace. Confirm these network paths from the hub before enabling growth.
 
 ### 2. Build and publish an immutable image
 
+Every push to `main` that passes CI publishes `ghcr.io/team-redbull/herzi:sha-<12-char commit>` and
+`:latest` (the `publish` job in `.github/workflows/ci.yml`). Deploy the `sha-` tag
+(`--set image.repository=ghcr.io/team-redbull/herzi --set image.tag=sha-<commit>`); the package must be
+readable by the cluster, or add an `imagePullSecret`. To build by hand instead:
+
 For a registry you can push to (replace the example repository and tag):
 
 ```bash
