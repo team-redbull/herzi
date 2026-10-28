@@ -32,10 +32,13 @@ namespace. Confirm these network paths from the hub before enabling growth.
 
 ### 2. Build and publish an immutable image
 
-Every push to `main` that passes CI publishes `ghcr.io/team-redbull/herzi:sha-<12-char commit>` and
-`:latest` (the `publish` job in `.github/workflows/ci.yml`). Deploy the `sha-` tag
-(`--set image.repository=ghcr.io/team-redbull/herzi --set image.tag=sha-<commit>`); the package must be
-readable by the cluster, or add an `imagePullSecret`. To build by hand instead:
+Every push to `main` that passes CI publishes the image and tags the commit (the `publish` job in
+`.github/workflows/ci.yml`). The version comes from the Conventional Commit messages since the last `vX.Y.Z` tag
+(`hack/next-version.sh`): `feat!:` or a `BREAKING CHANGE:` line bumps the major, `feat:` the minor, and anything
+else (`fix:`, `docs:`, `ci:`, `chore:` ...) the patch. The first release is `0.0.1`/`0.1.0`, depending on the commits.
+Images: `ghcr.io/team-redbull/herzi:<X.Y.Z>`, `:sha-<12-char commit>` and `:latest`; git tag `v<X.Y.Z>`.
+Deploy the version tag (`--set image.repository=ghcr.io/team-redbull/herzi --set image.tag=<X.Y.Z>`); the package
+must be readable by the cluster, or add an `imagePullSecret`. To build by hand instead:
 
 For a registry you can push to (replace the example repository and tag):
 

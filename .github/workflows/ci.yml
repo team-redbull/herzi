@@ -91,22 +91,41 @@ jobs:
     needs: [unit, integration, chart, image]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: publish
+      cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
       packages: write
     env:
       IMAGE: ghcr.io/team-redbull/herzi
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Next version from Conventional Commits
+        id: version
+        run: echo "value=$(hack/next-version.sh)" >> "$GITHUB_OUTPUT"
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Build and push
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
-          tag="sha-${GITHUB_SHA::12}"
-          make docker-build IMG="$IMAGE:$tag" VERSION="$tag" COMMIT="$GITHUB_SHA"
-          docker tag "$IMAGE:$tag" "$IMAGE:latest"
-          docker push "$IMAGE:$tag"
+          make docker-build IMG="$IMAGE:$VERSION" VERSION="$VERSION" COMMIT="$GITHUB_SHA"
+          docker tag "$IMAGE:$VERSION" "$IMAGE:sha-${GITHUB_SHA::12}"
+          docker tag "$IMAGE:$VERSION" "$IMAGE:latest"
+          docker push "$IMAGE:$VERSION"
+          docker push "$IMAGE:sha-${GITHUB_SHA::12}"
           docker push "$IMAGE:latest"
+      - name: Tag the release
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git tag --points-at HEAD --list 'v*')" ]; then
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+          fi

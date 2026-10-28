@@ -13,6 +13,7 @@ MCE hub it keeps each InfraEnv's pool of spare machines matched to HyperShift No
   failure never permits a full order.
 - **Never push, open a PR or change a remote** unless the user asks. Commit locally only when asked.
 - **Commit and PR text carries only the real description**: no `Co-Authored-By` and no "Generated with" lines.
+- **Commit subjects are Conventional Commits** (`feat:`, `fix:`, `docs:`, `feat!:`): CI derives the release version and image tag from them.
 - **Deploy with the Helm chart only** (`charts/herzi`). No kustomize, no `config/` tree.
 - **Read Agent, InfraEnv and NodePool as unstructured** through the views in `internal/kube`. Do not import the typed
   assisted-service or HyperShift API modules (100+ modules and an ORM for a dozen fields).
