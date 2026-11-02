@@ -150,7 +150,7 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 ## Definition of done (production ready)
 - `go vet`, `golangci-lint`, `govulncheck` clean; unit coverage of `internal/pipeline` and `internal/config` >= 90%.
 - Every invariant and every row of the design's test table is a test.
-- envtest suite covers: pool grows, probe mode, blocked pool, paused pool, unmanaged pool, lease/restart behaviour of the block annotation.
+- envtest suite covers: pool grows, probe mode, blocked pool, paused pool, ignored pool, lease/restart behaviour of the block annotation.
 - Container is distroless, non-root, read-only root filesystem, seccomp RuntimeDefault, all capabilities dropped.
 - Metrics, probes, RBAC minimal (get/list/watch on the three kinds, get/update/patch on InfraEnv metadata for the block annotation, Lease), leader election with `LeaderElectionReleaseOnCancel`.
 - README, runbook and chart alert rules exist; `charts/herzi` passes `make helm-lint helm-test test-alerts manifests-drift`.

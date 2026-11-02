@@ -85,11 +85,11 @@ cp hack/chart/example-values.yaml my-hub-values.yaml
 Expect a local values file with three illustrative pools; edit it for this hub.
 Required values are `image.repository`, `config.mceName`, `config.installURL` and
 `config.temporalAddress`. Replace the example endpoints and `config.activityQueue`
-(or leave the queue empty to derive it from mceName). List only the InfraEnv names
-to manage under `config.pools`. `dryRunGrow` defaults to `true`, so every pool starts in dry run;
+(or leave the queue empty to derive it from mceName). Every InfraEnv in `agentNamespace` is managed by
+default; use `config.pools` only for per-InfraEnv overrides or `exclude: true`. `dryRunGrow` defaults to `true`, so every pool starts in dry run;
 a per-pool `dryRunGrow: false` takes that pool live.
-Provision any opted-in Secrets separately in `herzi-system` before installation.
-Missing required values fail Helm validation early; the default manages no pools.
+Provision any referenced Secrets separately in `herzi-system` before installation.
+Missing required values fail Helm validation early; a fresh install manages every InfraEnv, all in dry run.
 
 ### 4. Render and install
 
@@ -159,7 +159,7 @@ These are the 20 current top-level keys; controller fields are detailed in the
 | `resources` | Requests CPU `100m`/memory `128Mi`; limits CPU `"1"`/memory `512Mi`. |
 | `serviceAccount` | `create: true`, `name: ""`, `annotations: {}`; empty name uses release name when created, `default` otherwise. |
 | `rbac` | `create: true` gates all roles/bindings; `metricsReader.subjects: []`. |
-| `config` | `mceName: ""`, `installURL: ""`, `temporalAddress: ""` (required); `interval: 60s`, `reconcileTimeout: 60s`, `agentNamespace: inventory`, `maxSlots: 100`, `ambiguousWait: 5m`, `stuckAfter: 2h`, `temporalNamespace: default`, `activityQueue: ""` (derived), `workflowQueue: install-server-workflow`, `segmentQueue: segment-lifecycle-activity`; `defaults: {highPct: 10, minFree: 2, maxOpenRunsPerPool: 15, probeInterval: 20m, drawGrace: 2m, failureMemory: 6h, settlingMax: 60m, dryRunGrow: true, paused: false}`; `pools: {}`. |
+| `config` | `mceName: ""`, `installURL: ""`, `temporalAddress: ""` (required); `interval: 60s`, `reconcileTimeout: 60s`, `agentNamespace: inventory`, `maxSlots: 100`, `ambiguousWait: 5m`, `stuckAfter: 2h`, `temporalNamespace: default`, `activityQueue: ""` (derived), `workflowQueue: install-server-workflow`, `segmentQueue: segment-lifecycle-activity`; `defaults: {highPct: 10, minFree: 2, maxOpenRunsPerPool: 15, probeInterval: 20m, drawGrace: 2m, failureMemory: 6h, settlingMax: 60m, dryRunGrow: true, paused: false}`; `ignoreLabel: herzi.redbull.io/ignore`; `pools: {}`. |
 | `temporal` | `tls.existingSecret: ""`, `tls.caKey: ca.crt`; optional existing server CA Secret. |
 | `metrics` | HTTPS metrics Service: `enabled: true`, `port: 8443`. |
 | `serviceMonitor` | `enabled: false`, `interval: 30s`, `labels: {}`, `endpoint: {}` (raw endpoint map). |
@@ -211,10 +211,10 @@ and `make manifests-drift` guards the generated rules; both run in CI.
 The mounted file is `/etc/herzi/config.yaml`, from the stable ConfigMap
 `herzi-config` in `herzi-system` for the default release name. Edit [example values](../../hack/chart/example-values.yaml)
 for the hub before rendering. Helm values put hub fields under `config`, pool defaults
-under `config.defaults` and opted-in InfraEnv names under `config.pools`. In the
+under `config.defaults` and per-InfraEnv overrides under `config.pools`. In the
 rendered controller file, hub fields are top-level with `defaults` and `pools`. Every pool field
 can be overridden. Absent fields inherit; explicit `0` and `false` override.
-An empty pool mapping opts in with all defaults. Durations are strings such as
+Every InfraEnv is managed with the defaults; a pool entry only overrides them. Durations are strings such as
 `"120s"` and `"20m"`, never integer nanoseconds. All fields appear in the
 [README reference](../../README.md#configuration).
 
@@ -255,7 +255,7 @@ kubectl -n inventory annotate infraenvs.agent-install.openshift.io 32-128-zone-1
 ```
 
 Config `paused: true` also pauses a pool; removing the annotation does not override
-that setting. The controller still observes paused/unmanaged pools. NodePool
+that setting. The controller still observes paused pools; ignored pools are not read at all. NodePool
 `pausedUntil` and deletion exclude its demand. The InfraEnv annotation
 `herzi.redbull.io/blocked-until` is a controller-written RFC3339 UTC deadline,
 written BEFORE each POST as attempt time + ambiguousWait (default 5m). Failure to

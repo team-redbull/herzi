@@ -104,7 +104,7 @@ func (r *reader) deleting() bool { return !r.timestamp("metadata", "deletionTime
 
 func ParseInfraEnv(u *unstructured.Unstructured) (InfraEnv, error) {
 	r := newReader(u)
-	v := InfraEnv{Name: r.str("metadata", "name"), Namespace: r.str("metadata", "namespace"), Annotations: r.stringMap("metadata", "annotations"), Deleting: r.deleting(), EarlyBound: r.reference("spec", "clusterRef")}
+	v := InfraEnv{Name: r.str("metadata", "name"), Namespace: r.str("metadata", "namespace"), Labels: r.stringMap("metadata", "labels"), Annotations: r.stringMap("metadata", "annotations"), Deleting: r.deleting(), EarlyBound: r.reference("spec", "clusterRef")}
 	return v, r.err
 }
 

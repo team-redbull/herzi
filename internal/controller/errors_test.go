@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/team-redbull/herzi/internal/config"
 	"github.com/team-redbull/herzi/internal/kube"
 	"github.com/team-redbull/herzi/internal/pipeline"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -87,11 +88,11 @@ func TestMalformedFreshReadAndDedup(t *testing.T) {
 	f.r.blocked(context.Background(), "p", nil)
 	require.Empty(t, f.r.reasons)
 }
-func TestUnmanagedMetricsDisappear(t *testing.T) {
+func TestExcludedMetricsDisappear(t *testing.T) {
 	cfg := testConfig()
-	delete(cfg.Pools, "p")
+	cfg.Pools["p"] = config.PoolOverride{Exclude: new(true)}
 	f := setup(t, cfg, infra("p"))
-	f.reconcile(t, "p")
+	reconcileOnce(t, f, "p")
 	families, err := f.reg.Gather()
 	require.NoError(t, err)
 	for _, family := range families {

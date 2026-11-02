@@ -102,8 +102,8 @@ endpoints in `hack/chart/example-values.yaml` before running; local execution ca
 ## Configuration
 
 Helm values put controller settings under `config`; the rendered controller file has hub settings at its YAML top level. Every pool setting lives under `defaults`
-and may be overridden under `pools.<InfraEnv name>`; the presence of that name opts
-in. Explicit zero/false are overrides; omissions inherit. Durations are strings.
+and may be overridden under `pools.<InfraEnv name>`. Every InfraEnv in `agentNamespace` is managed
+with the defaults; `pools` only holds overrides. Explicit zero/false are overrides; omissions inherit. Durations are strings.
 “Required/site-specific” means no portable default is defined by the design or
 shared contract. The sample uses illustrative values, not discovered endpoints.
 
@@ -131,8 +131,9 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | settlingMax | 60m | Pool | Unclaimable Agent settling allowance |
 | dryRunGrow | true | Pool | Log Would install without posting |
 | paused | false | Pool | Observe but never order |
-| defaults | Pool defaults above | Hub structure | Base for every listed pool |
-| pools | Empty; no managed pools | Hub structure | InfraEnv name to pool override mapping |
+| defaults | Pool defaults above | Hub structure | Base for every InfraEnv |
+| pools | Empty; every InfraEnv uses the defaults | Hub structure | InfraEnv name to pool override mapping; `exclude: true` ignores that InfraEnv |
+| ignoreLabel | herzi.redbull.io/ignore | Hub | An InfraEnv carrying this label key (any value) is ignored with its NodePools; live reload |
 
 See the [chart values reference](docs/ops/operating.md#chart-values-reference) and
 the complete [example values](hack/chart/example-values.yaml), including all Temporal
@@ -232,7 +233,7 @@ calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot
 
 Each custom-buffer row uses `highPct: 0, minFree: <buffer>`; the demand-50 row
 uses defaults (`highPct: 10, minFree: 2`). Probe rows use the default timings.
-Validation runs first; unmanaged or blocked pools never order.
+Validation runs first; ignored or blocked pools never order.
 
 | demand | assigned | claimable | settling | open | recent evidence | buffer | expect |
 |---|---|---|---|---|---|---|---|
@@ -244,7 +245,7 @@ Validation runs first; unmanaged or blocked pools never order.
 | 20 | 4 | 3 | 16 | 0 | – | 2 | Hold (supply 23) |
 | 12 | 4 | 3 | 16 | 0 | – | 2 | Hold (supply 23) |
 | 0 | 0 | 0 | 0 | 0 | – | 2 | Grow 2 Full (seed) |
-| 0 | 0 | 0 | 0 | 0 | unmanaged | 2 | Blocked (Validate) |
+| 0 | 0 | 0 | 0 | 0 | paused | 2 | Blocked (Validate) |
 | 6 | 0 | 0 | 0 | 0 | capacity fail 3 min ago, no proof | 2 | Hold "probe wait" |
 | 6 | 0 | 0 | 0 | 0 | capacity fail 21 min ago | 2 | Grow 1 Probe |
 | 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 1 min ago | 2 | Hold "probe running" |

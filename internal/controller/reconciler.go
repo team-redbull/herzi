@@ -129,7 +129,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 		}
 	}()
 	result = ctrl.Result{RequeueAfter: cfg.Interval}
-	if !cfg.Manages(req.Name) {
+	if !cfg.Manages(req.Name, nil) {
 		r.forget(req.Name)
 	}
 	if req.Namespace != cfg.AgentNamespace {
@@ -142,6 +142,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 			return result, nil
 		}
 		return result, fmt.Errorf("get InfraEnv: %w", err)
+	}
+	if !cfg.Manages(req.Name, ie.GetLabels()) {
+		r.forget(req.Name)
+		return ctrl.Result{}, nil
 	}
 	raw, err := r.gather(ctx, r.Client, cfg, req.Name, now, false)
 	if err != nil {
@@ -176,7 +180,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	r.observe(facts, verdict, intent, pc, now)
 	exists := true
 	defer func() {
-		if !exists || !cfg.Manages(req.Name) {
+		if !exists || !facts.Managed {
 			r.forget(req.Name)
 		} else if retErr == nil {
 			r.Metrics.Successful(req.Name, now)

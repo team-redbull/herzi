@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // Validate joins hub, default and merged-pool errors; Config must already be canonical.
@@ -37,6 +39,7 @@ func (c Config) validateDocument() error {
 			"ocp4-"),
 		"mceName",
 		"must be non-empty and canonical (ocp4- prefix)")
+	check(len(validation.IsQualifiedName(c.IgnoreLabel)) == 0, "ignoreLabel", "must be a valid Kubernetes label key")
 	u, err := url.Parse(c.InstallURL)
 	check(err == nil &&
 		u != nil &&

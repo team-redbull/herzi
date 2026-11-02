@@ -12,6 +12,7 @@ type HubConfig struct {
 	MaxSlots         int           `json:"maxSlots"`
 	AmbiguousWait    time.Duration `json:"ambiguousWait"`
 	StuckAfter       time.Duration `json:"stuckAfter"`
+	IgnoreLabel      string        `json:"ignoreLabel"`
 
 	TemporalAddress   string `json:"temporalAddress"`
 	TemporalNamespace string `json:"temporalNamespace"`
@@ -43,6 +44,7 @@ type PoolOverride struct {
 	SettlingMax        *time.Duration `json:"settlingMax,omitempty"`
 	DryRunGrow         *bool          `json:"dryRunGrow,omitempty"`
 	Paused             *bool          `json:"paused,omitempty"`
+	Exclude            *bool          `json:"exclude,omitempty"`
 }
 
 type Config struct {

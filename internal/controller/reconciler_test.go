@@ -201,15 +201,13 @@ func TestReconcileDecisions(t *testing.T) {
 	}
 }
 func TestBlockedPools(t *testing.T) {
-	for _, kind := range []string{"unmanaged", "paused annotation", "paused config", "early bound", "deleting", "future block", "expired block", "zero activity", "zero workflow", "zero segment", "poller error", "sweep error", "bad selector", "invalid pool config", "malformed Agent", "malformed NodePool", "malformed InfraEnv"} {
+	for _, kind := range []string{"paused annotation", "paused config", "early bound", "deleting", "future block", "expired block", "zero activity", "zero workflow", "zero segment", "poller error", "sweep error", "bad selector", "invalid pool config", "malformed Agent", "malformed NodePool", "malformed InfraEnv"} {
 		t.Run(kind, func(t *testing.T) {
 			cfg := testConfig()
 			ie := infra("p")
 			np := node("workers", "p", 4)
 			objs := []client.Object{ie, np}
 			switch kind {
-			case "unmanaged":
-				delete(cfg.Pools, "p")
 			case "paused annotation":
 				ie.SetAnnotations(map[string]string{kube.AnnotationPaused: "true"})
 			case "paused config":

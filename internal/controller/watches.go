@@ -56,8 +56,16 @@ func (r *Reconciler) allPools(ctx context.Context, _ client.Object) []reconcile.
 		return nil
 	}
 	requests := make([]reconcile.Request, 0, len(list.Items))
+	known := make(map[string]bool, len(list.Items))
 	for _, ie := range list.Items {
+		known[ie.GetName()] = true
 		requests = append(requests, r.request(ie.GetName())...)
+	}
+	for name := range r.snapshot().Pools {
+		if !known[name] {
+			r.Metrics.Warning("pool override matches no InfraEnv")
+			log.FromContext(ctx).Info("Pool override matches no InfraEnv; check the name", "pool", name)
+		}
 	}
 	return requests
 }

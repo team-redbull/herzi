@@ -14,7 +14,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 	warnings := slices.Clone(raw.Warnings)
 	for _, ie := range raw.InfraEnvs {
 		f := PoolFacts{Key: PoolKey(ie.Name),
-			Managed: s.Manages(ie.Name),
+			Managed: s.Manages(ie.Name, ie.Labels),
 			Paused: s.ForPool(ie.Name).Paused ||
 				ie.Annotations[kube.AnnotationPaused] == "true",
 			Deleting:   ie.Deleting,

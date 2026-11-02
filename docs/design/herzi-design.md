@@ -190,9 +190,13 @@ controller **alerts**, because it cannot tell which bound Agents are orphaned. T
 An Agent with no pool label, or a NodePool with no InfraEnv label, produces a warning and a metric.
 It never blocks other pools.
 
-### 14. An unmanaged or paused pool
-Only pools listed in the config are managed. A pool can also be paused with an annotation or a config
-flag. The controller still reads and reports it, but never orders.
+### 14. An ignored or paused pool
+Every InfraEnv in `agentNamespace` is managed. An InfraEnv is ignored when it carries the ignore label
+(`ignoreLabel`, default `herzi.redbull.io/ignore`, any value), or when `pools.<name>.exclude` is true.
+An ignored InfraEnv is not read beyond its own object: no sweep, no orders, no metrics, no requeue, and
+its NodePools and Agents are not counted anywhere. Removing the label or the exclude starts managing it on
+the next event or config reload. A paused pool (annotation or config flag) is still read and reported,
+but never orders.
 
 TimedOut runs have no failure type. The sweeper sets `FailType = pipeline.FailUnknown`
 (`"unknown"`) without reading failure history. MergeState and Decide treat this as
@@ -364,7 +368,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 ```go
 func Attribute(raw RawSnapshot, cfg Config) map[PoolKey]PoolFacts {
-    for each InfraEnv ie (not deleting): facts[ie] = PoolFacts{Managed: cfg.Manages(ie),   // listed under pools:
+    for each InfraEnv ie (not deleting): facts[ie] = PoolFacts{Managed: cfg.Manages(ie, labels),   // not excluded and no ignore label
         Paused: cfg.ForPool(ie).Paused || annotationPaused(ie), BlockedUntil: annotation(ie, "blocked-until")}
 
     for each NodePool np:
@@ -529,6 +533,7 @@ installURL: https://<workflows-api>/workflows/server-lifecycle/install-server
 maxSlots: 100                       # must equal the route's slot range
 ambiguousWait: 5m                   # block after an unclear POST: protects against an API problem on this hub
 stuckAfter: 2h                      # an open run older than this => alert only
+ignoreLabel: herzi.redbull.io/ignore # an InfraEnv with this label key (any value) is ignored, and so are its NodePools; live reload
 
 # ---- pool settings: defaults, overridable per pool ----
 defaults:
@@ -542,17 +547,18 @@ defaults:
   dryRunGrow: true                  # rollout safeguard: log "Would install" instead of ordering
   paused: false
 
-# ---- pools: OPT-IN, keyed by InfraEnv name; only the fields written here differ ----
+# ---- pools: OVERRIDES ONLY, keyed by InfraEnv name; every other InfraEnv uses the defaults ----
 pools:
   "32-128-zone-1": { minFree: 5, maxOpenRunsPerPool: 8 }
   "16-64-zone-2":  { paused: true }
   "8-32-zone-1":   { highPct: 25, dryRunGrow: true } # explicit percentage override
+  "legacy-zone-3": { exclude: true }                 # ignored entirely
 ```
 
 **Merge rule.** For a pool, each field takes the pool's value if it is written, otherwise the default.
 In Go every pool field is a pointer (`*int`, `*time.Duration`, `*bool`), so "not written" is different from
 `0` or `false`: `minFree: 0` and `paused: false` are real overrides. A pool that appears in `pools:` with
-no fields is managed with all defaults. A pool that is not listed is not managed.
+no fields is the same as not listing it. `exclude: true` (pools only, never in `defaults`) ignores the InfraEnv.
 
 ```go
 func (c Config) ForPool(name string) PoolConfig {
@@ -609,7 +615,7 @@ The decision uses signed need; `herzi_pool_need` reports `max(0, need)`.
 | At/above target always Holds, regardless of supply composition or failure evidence | no unnecessary additions or probes |
 | Zero pollers on any of the three queues, or a poller error, blocks the pool | runs that never start |
 | Hub-scoped findings never block another pool | one stray object stalling the hub |
-| Unmanaged, paused, early-bound or deleting pool never grows | opt-in only |
+| Ignored, paused, early-bound or deleting pool never grows | ignore label or `exclude` |
 | `ids` builder output equals the Python builder's for a table of cases | contract with the route |
 | One frozen config and one clock per reconcile | mixed inputs |
 | Adding one claimable Agent never increases the ordered count (property test) | monotonicity |
@@ -618,7 +624,7 @@ The decision uses signed need; `herzi_pool_need` reports `max(0, need)`.
 
 Each custom-buffer row uses `highPct: 0, minFree: <buffer>`; the demand-50 row
 uses defaults (`highPct: 10, minFree: 2`). Probe rows use the default timings.
-Validation runs first; unmanaged or blocked pools never order.
+Validation runs first; ignored or blocked pools never order.
 
 | demand | assigned | claimable | settling | open | recent evidence | buffer | expect |
 |---|---|---|---|---|---|---|---|
@@ -630,7 +636,7 @@ Validation runs first; unmanaged or blocked pools never order.
 | 20 | 4 | 3 | 16 | 0 | – | 2 | Hold (supply 23) |
 | 12 | 4 | 3 | 16 | 0 | – | 2 | Hold (supply 23) |
 | 0 | 0 | 0 | 0 | 0 | – | 2 | Grow 2 Full (seed) |
-| 0 | 0 | 0 | 0 | 0 | unmanaged | 2 | Blocked (Validate) |
+| 0 | 0 | 0 | 0 | 0 | paused | 2 | Blocked (Validate) |
 | 6 | 0 | 0 | 0 | 0 | capacity fail 3 min ago, no proof | 2 | Hold "probe wait" |
 | 6 | 0 | 0 | 0 | 0 | capacity fail 21 min ago | 2 | Grow 1 Probe |
 | 6 | 0 | 0 | 0 | 1 | capacity fail 21 min ago, run started 1 min ago | 2 | Hold "probe running" |
@@ -671,7 +677,7 @@ with no other supply needs 1. More supply never increases the order count.
 | 8 | Failed or hung runs | fast fails re-ordered every pass | Probe mode: 1 machine per 20 min, failure-class alerts, poller check, startup-configured stuck alert |
 | 9 | Candidate window at batch 20 | 20 unusable candidates | Open-run cap is load tuning only. Real fix is server-side |
 | 10 | NodePool nil replicas, deleting, paused | nil pointer; phantom demand | Handled in Attribute; `pausedUntil` parsed |
-| 11 | Zero-demand pools auto-seeded | 12 InfraEnvs × minFree 2 → 24 machines | Opt-in `pools` list |
+| 11 | Zero-demand pools auto-seeded | 12 InfraEnvs × minFree 2 → 24 machines | Every InfraEnv starts in dry run; use the ignore label or `exclude` for ones to skip |
 | 12 | Buffer floor meaning | small pools need a fixed spare floor | One buffer: max(minFree, rounded highPct percentage) |
 | 13 | 202 does not mean started | all slots busy → started 0 | Only `started` slots counted; the sweep decides the rest |
 | 14 | Early-bound InfraEnv | hosts bound at once | Validate blocks it |

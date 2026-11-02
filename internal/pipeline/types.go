@@ -12,7 +12,7 @@ import (
 type PoolKey string
 
 type Settings interface {
-	Manages(name string) bool
+	Manages(name string, labels map[string]string) bool
 
 	ForPool(name string) config.PoolConfig
 }

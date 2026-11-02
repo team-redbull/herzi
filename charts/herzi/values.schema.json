@@ -271,10 +271,18 @@
                     "not": {}
                   }
                 ]
+              },
+              "exclude": {
+                "type": "boolean"
               }
             },
             "additionalProperties": false
           }
+        },
+        "ignoreLabel": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
         }
       },
       "additionalProperties": false,

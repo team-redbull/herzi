@@ -24,7 +24,7 @@ func TestStoreLastGoodAndValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := s.Snapshot()
-	if !old.Manages("test") || old.ForPool("test").MinFree != 5 || !s.Valid() {
+	if !old.Manages("test", nil) || old.ForPool("test").MinFree != 5 || !s.Valid() {
 		t.Fatal("successful update not published")
 	}
 
@@ -72,7 +72,7 @@ func TestStoreOwnsInitial(t *testing.T) {
 	*initial.Pools["test"].MinFree = 999
 	*initial.Pools["test"].HighPct = 999
 	delete(initial.Pools, "empty")
-	if s.Snapshot().ForPool("test").HighPct != 30 || s.Snapshot().ForPool("test").MinFree != 2 || !s.Snapshot().Manages("empty") {
+	if s.Snapshot().ForPool("test").HighPct != 30 || s.Snapshot().ForPool("test").MinFree != 2 || !s.Snapshot().Manages("empty", nil) {
 		t.Fatal("initial config aliases store")
 	}
 }
@@ -100,7 +100,7 @@ func TestStoreConcurrentSnapshotUpdate(t *testing.T) {
 					if err := c.Validate(); err != nil {
 						t.Error(err)
 					}
-					if c.Manages("test") && c.ForPool("test").MinFree != c.Defaults.MinFree {
+					if c.Manages("test", nil) && c.ForPool("test").MinFree != c.Defaults.MinFree {
 						t.Error("mixed configuration generations")
 					}
 					_ = s.Valid()

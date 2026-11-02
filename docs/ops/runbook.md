@@ -91,7 +91,7 @@ herzi_pool_blocked{pool="32-128-zone-1"}
 kubectl -n "$AGENT_NAMESPACE" get infraenvs.agent-install.openshift.io "$POOL" -o jsonpath='{.metadata.annotations.herzi\.redbull\.io/blocked-until}{"\n"}'
 ```
 
-For read/sweep errors restore API or Temporal access and RBAC. For zero pollers repair workers. For selector/config errors correct only the affected pool. For paused/unmanaged states confirm operator intent; paused pools do not fire this alert. The `herzi.redbull.io/blocked-until` marker is persisted BEFORE every POST, cleared with JSON null after a definite parsed outcome, and extended from outcome time for ambiguous/rejected outcomes. Prewrite failure prevents the POST; failed clear leaves expiry protection. Durable `herzi.redbull.io/state` retains failure/probe evidence across restart and slot reuse. For an ambiguity block let it expire and require a full sweep before ordering; never erase it to force a retry.
+For read/sweep errors restore API or Temporal access and RBAC. For zero pollers repair workers. For selector/config errors correct only the affected pool. For paused states confirm operator intent; paused pools do not fire this alert. The `herzi.redbull.io/blocked-until` marker is persisted BEFORE every POST, cleared with JSON null after a definite parsed outcome, and extended from outcome time for ambiguous/rejected outcomes. Prewrite failure prevents the POST; failed clear leaves expiry protection. Durable `herzi.redbull.io/state` retains failure/probe evidence across restart and slot reuse. For an ambiguity block let it expire and require a full sweep before ordering; never erase it to force a retry.
 
 <a id="stuck-agents"></a>
 

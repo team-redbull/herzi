@@ -23,6 +23,7 @@ config:
   maxSlots: 100 # Fixed at 100 API slots.
   ambiguousWait: 5m # Block after an unclear POST; live reload.
   stuckAfter: 2h # Open-run warning age; startup-bound.
+  ignoreLabel: herzi.redbull.io/ignore # An InfraEnv carrying this label key is ignored (and so are its NodePools); live reload.
   temporalAddress: "" # Required Temporal host:port.
   temporalNamespace: default # Temporal namespace.
   activityQueue: "" # Empty derives server-lifecycle-activity-<canonical mceName>.
@@ -38,7 +39,7 @@ config:
     settlingMax: 60m # Unbound Agent age; at least probeInterval.
     dryRunGrow: true # Log intended orders instead of calling install-server; set false per pool to go live.
     paused: false # Suspend growth for this pool.
-  pools: {} # InfraEnv name to overrides; presence opts in.
+  pools: {} # Optional per-InfraEnv overrides; every other InfraEnv uses the defaults. exclude: true ignores one.
 temporal:
   tls:
     existingSecret: ""

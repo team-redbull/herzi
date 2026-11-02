@@ -15,8 +15,8 @@ func poolConfig() config.PoolConfig {
 
 type settings struct{ p config.PoolConfig }
 
-func (s settings) Manages(name string) bool         { return name != "unmanaged" }
-func (s settings) ForPool(string) config.PoolConfig { return s.p }
+func (s settings) Manages(name string, _ map[string]string) bool { return name != "unmanaged" }
+func (s settings) ForPool(string) config.PoolConfig              { return s.p }
 func snapshot() RawSnapshot {
 	return RawSnapshot{At: clockTime(), InfraEnvs: []kube.InfraEnv{{Name: "a"}, {Name: "b"}}, Pollers: PollerStatus{Activity: 1, Workflow: 1, Segment: 1}, Sweep: map[PoolKey]SweepResult{}}
 }

@@ -334,7 +334,7 @@ func TestPartialOutcomeCountsExactlyOnce(t *testing.T) {
 func TestUnmanageForgetsEvenWhenAPIUnavailable(t *testing.T) {
 	f := setup(t, testConfig(), infra("p"))
 	f.reconcile(t, "p")
-	require.NoError(t, f.r.Config.Update([]byte(strings.Replace(reloadConfig, "pools: {p: {}, q: {}}", "pools: {q: {}}", 1))))
+	require.NoError(t, f.r.Config.Update([]byte(strings.Replace(reloadConfig, "pools: {p: {}, q: {}}", "pools: {p: {exclude: true}, q: {}}", 1))))
 	f.r.Client = readClient{Client: f.c, reader: failingReader{Reader: f.c, get: true}}
 	_, err := f.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(infra("p"))})
 	require.Error(t, err)

@@ -31,6 +31,7 @@ type poolInput struct {
 	SettlingMax        *durationText `yaml:"settlingMax"`
 	DryRunGrow         *bool         `yaml:"dryRunGrow"`
 	Paused             *bool         `yaml:"paused"`
+	Exclude            *bool         `yaml:"exclude"`
 }
 
 type configInput struct {
@@ -42,6 +43,7 @@ type configInput struct {
 	MaxSlots          *int                 `yaml:"maxSlots"`
 	AmbiguousWait     *durationText        `yaml:"ambiguousWait"`
 	StuckAfter        *durationText        `yaml:"stuckAfter"`
+	IgnoreLabel       *string              `yaml:"ignoreLabel"`
 	TemporalAddress   *string              `yaml:"temporalAddress"`
 	TemporalNamespace *string              `yaml:"temporalNamespace"`
 	ActivityQueue     *string              `yaml:"activityQueue"`
@@ -87,18 +89,6 @@ func Load(data []byte) (Config, error) {
 			c.ReconcileTimeout = *d
 		}
 	}
-	if input.MCEName != nil {
-		c.MCEName = *input.MCEName
-	}
-	if input.AgentNamespace != nil {
-		c.AgentNamespace = *input.AgentNamespace
-	}
-	if input.InstallURL != nil {
-		c.InstallURL = *input.InstallURL
-	}
-	if input.MaxSlots != nil {
-		c.MaxSlots = *input.MaxSlots
-	}
 	if input.AmbiguousWait != nil {
 		d, err := parseDuration(input.AmbiguousWait, "ambiguousWait")
 		if err != nil {
@@ -115,27 +105,16 @@ func Load(data []byte) (Config, error) {
 			c.StuckAfter = *d
 		}
 	}
-	if input.TemporalAddress != nil {
-		c.TemporalAddress = *input.TemporalAddress
-	}
-	if input.TemporalNamespace != nil {
-		c.TemporalNamespace = *input.TemporalNamespace
-	}
-	if input.ActivityQueue != nil {
-		c.ActivityQueue = *input.ActivityQueue
-	}
-	if input.WorkflowQueue != nil {
-		c.WorkflowQueue = *input.WorkflowQueue
-	}
-	if input.SegmentQueue != nil {
-		c.SegmentQueue = *input.SegmentQueue
-	}
+	c.applyPlainFields(input)
 	c.MCEName = strings.TrimSpace(c.MCEName)
 	if c.MCEName != "" && !strings.HasPrefix(c.MCEName, "ocp4-") {
 		c.MCEName = "ocp4-" + c.MCEName
 	}
 	if c.ActivityQueue == "" && c.MCEName != "" {
 		c.ActivityQueue = activityQueuePrefix + c.MCEName
+	}
+	if input.Defaults.Exclude != nil {
+		problems = append(problems, errors.New("defaults.exclude: not allowed, it would exclude every InfraEnv; set exclude under the pool or use the ignore label"))
 	}
 	o, err := input.Defaults.convert("defaults")
 	if err != nil {
@@ -154,6 +133,40 @@ func Load(data []byte) (Config, error) {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// applyPlainFields copies the hub fields that need no parsing.
+func (c *HubConfig) applyPlainFields(input configInput) {
+	if input.MCEName != nil {
+		c.MCEName = *input.MCEName
+	}
+	if input.AgentNamespace != nil {
+		c.AgentNamespace = *input.AgentNamespace
+	}
+	if input.InstallURL != nil {
+		c.InstallURL = *input.InstallURL
+	}
+	if input.MaxSlots != nil {
+		c.MaxSlots = *input.MaxSlots
+	}
+	if input.IgnoreLabel != nil {
+		c.IgnoreLabel = strings.TrimSpace(*input.IgnoreLabel)
+	}
+	if input.TemporalAddress != nil {
+		c.TemporalAddress = *input.TemporalAddress
+	}
+	if input.TemporalNamespace != nil {
+		c.TemporalNamespace = *input.TemporalNamespace
+	}
+	if input.ActivityQueue != nil {
+		c.ActivityQueue = *input.ActivityQueue
+	}
+	if input.WorkflowQueue != nil {
+		c.WorkflowQueue = *input.WorkflowQueue
+	}
+	if input.SegmentQueue != nil {
+		c.SegmentQueue = *input.SegmentQueue
+	}
 }
 
 func parseDuration(raw *durationText, field string) (*time.Duration, error) {
@@ -177,6 +190,7 @@ func (p poolInput) convert(path string) (PoolOverride, error) {
 		MaxOpenRunsPerPool: p.MaxOpenRunsPerPool,
 		DryRunGrow:         p.DryRunGrow,
 		Paused:             p.Paused,
+		Exclude:            p.Exclude,
 	}
 	var problems []error
 	if p.ProbeInterval != nil {

@@ -105,7 +105,7 @@ func TestLoad(t *testing.T) {
 					t.Fatal(diff)
 				}
 			}
-			if tt.name == "empty pool" && (!c.Manages("test") || c.ForPool("test") != config.Defaults()) {
+			if tt.name == "empty pool" && (!c.Manages("test", nil) || c.ForPool("test") != config.Defaults()) {
 				t.Fatal("empty pool must be managed with defaults")
 			}
 			if tt.name == "missing defaults fields" && (c.Defaults.MinFree != 0 || c.Defaults.ProbeInterval != 20*time.Minute) {
@@ -202,8 +202,8 @@ pools:
 	if diff := cmp.Diff(want, c.ForPool("test")); diff != "" {
 		t.Fatal(diff)
 	}
-	if c.Manages("absent") || !c.Manages("test") {
-		t.Fatal("incorrect managed membership")
+	if !c.Manages("absent", nil) || !c.Manages("test", nil) {
+		t.Fatal("every InfraEnv is managed unless excluded or labelled")
 	}
 	if c.ForPool("absent") != c.Defaults {
 		t.Fatal("unlisted pool did not get defaults")
@@ -352,7 +352,7 @@ segmentQueue: s
 	}
 	want := config.HubConfig{MCEName: "ocp4-custom", InstallURL: "http://example.com/install", Interval: 3 * time.Minute,
 		ReconcileTimeout: 90 * time.Second, AgentNamespace: "custom", MaxSlots: 100, AmbiguousWait: 10 * time.Minute, StuckAfter: 3 * time.Hour,
-		TemporalAddress: "localhost:7233", TemporalNamespace: "custom", ActivityQueue: "a", WorkflowQueue: "w", SegmentQueue: "s"}
+		TemporalAddress: "localhost:7233", TemporalNamespace: "custom", ActivityQueue: "a", WorkflowQueue: "w", SegmentQueue: "s", IgnoreLabel: config.DefaultIgnoreLabel}
 	if diff := cmp.Diff(want, c.HubConfig); diff != "" {
 		t.Fatal(diff)
 	}

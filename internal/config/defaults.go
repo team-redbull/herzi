@@ -12,17 +12,24 @@ const (
 	DefaultSegmentQueue         = "segment-lifecycle-activity"
 	activityQueuePrefix         = "server-lifecycle-activity-"
 	DefaultTemporalNamespaceVal = "default"
+	DefaultIgnoreLabel          = "herzi.redbull.io/ignore"
 )
 
 func DefaultHub() HubConfig {
 	return HubConfig{Interval: time.Minute, ReconcileTimeout: time.Minute, AgentNamespace: "inventory",
 		MaxSlots: 100, AmbiguousWait: 5 * time.Minute, StuckAfter: 2 * time.Hour,
 		TemporalNamespace: DefaultTemporalNamespaceVal, WorkflowQueue: DefaultWorkflowQueue,
-		SegmentQueue: DefaultSegmentQueue}
+		SegmentQueue: DefaultSegmentQueue, IgnoreLabel: DefaultIgnoreLabel}
 }
 
-// Manages reports whether the pool is explicitly listed in configuration.
-func (c Config) Manages(name string) bool { _, ok := c.Pools[name]; return ok }
+// Manages is true for every InfraEnv except one excluded under pools or carrying the ignore label.
+func (c Config) Manages(name string, labels map[string]string) bool {
+	if o := c.Pools[name].Exclude; o != nil && *o {
+		return false
+	}
+	_, ignored := labels[c.IgnoreLabel]
+	return !ignored
+}
 
 // ForPool merges written pool overrides over defaults, field by field.
 func (c Config) ForPool(name string) PoolConfig { return merge(c.Defaults, c.Pools[name]) }

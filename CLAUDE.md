@@ -75,6 +75,8 @@ Unit tests with the fake client passing does not mean envtest passes: run the en
   that started after the last capacity failure and completed an `acquire_servers` activity.
 - Pool-scoped problems block only their pool; hub-scoped findings are warnings. `maxSlots` must be 100. Timing relations are
   validated (`failureMemory >= 2*probeInterval`, `interval <= probeInterval`, `settlingMax >= probeInterval`, `drawGrace < probeInterval`).
+- Every InfraEnv in `agentNamespace` is managed; `pools` holds overrides only. It is ignored (no reads, orders, metrics or requeue) when it
+  carries the `ignoreLabel` key (default `herzi.redbull.io/ignore`, any value) or has `pools.<name>.exclude: true` (never in `defaults`).
 - `dryRunGrow` (config, per pool or in `defaults`) logs `Would install` and orders nothing. The code and chart DEFAULT is `true`, so every pool
   starts in dry run. Going live is an explicit `dryRunGrow: false` per pool, one pool at a time.
 

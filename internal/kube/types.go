@@ -32,6 +32,7 @@ var (
 type InfraEnv struct {
 	Name        string
 	Namespace   string
+	Labels      map[string]string
 	Annotations map[string]string
 	Deleting    bool
 	EarlyBound  bool
