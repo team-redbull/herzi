@@ -27,7 +27,7 @@ GO_PACKAGES ?= ./cmd/... ./internal/...
 UNIT_PACKAGES = $$(go list ./internal/... | sed '\|/internal/controller\(/\|$$\)|d')
 INTEGRATION_PACKAGES ?= ./internal/controller/...
 
-.PHONY: all help manifests generate fmt vet test test-integration lint lint-fix lint-config vuln ci build run docker-build docker-push docker-buildx deploy undeploy helm-lint helm-test helm-package test-alerts manifests-drift controller-gen envtest setup-envtest golangci-lint govulncheck
+.PHONY: all help manifests generate fmt fmt-check vet test test-integration lint lint-fix lint-config vuln ci build run docker-build docker-push docker-buildx deploy undeploy helm-lint helm-test helm-package test-alerts manifests-drift controller-gen envtest setup-envtest golangci-lint govulncheck
 all: build
 help: ## Display targets.
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -37,6 +37,8 @@ generate: controller-gen ## Generate DeepCopy methods.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./internal/..."
 fmt: ## Format Go sources.
 	go fmt $(GO_PACKAGES)
+fmt-check: ## Fail when a Go source is not gofmt-formatted.
+	@bad="$$(gofmt -l cmd internal)"; if [ -n "$$bad" ]; then echo "not formatted (run make fmt):"; echo "$$bad"; exit 1; fi
 vet: ## Vet Go sources.
 	go vet $(GO_PACKAGES)
 test: ## Run unit race tests.
@@ -51,7 +53,7 @@ lint-config: golangci-lint ## Validate lint configuration.
 	"$(GOLANGCI_LINT)" config verify
 vuln: govulncheck ## Check reachable Go vulnerabilities.
 	"$(GOVULNCHECK)" $(GO_PACKAGES)
-ci: lint vet test vuln helm-lint helm-test test-alerts manifests-drift ## Local CI checks.
+ci: fmt-check lint vet test vuln helm-lint helm-test test-alerts manifests-drift ## Local CI checks.
 build: ## Build the static controller binary.
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)' -o bin/manager ./cmd

@@ -35,7 +35,7 @@ export KUBEBUILDER_ASSETS=$PWD/bin/k8s/1.37.0-linux-amd64
 | Command | What it does |
 |---|---|
 | `make test` / `make test-integration` | unit tests with the race detector / the envtest suite (real kube-apiserver) |
-| `make lint` `make vuln` | golangci-lint, govulncheck (both must report nothing) |
+| `make fmt-check` `make lint` `make vuln` | gofmt check, golangci-lint, govulncheck (all must report nothing) |
 | `make manifests` `make manifests-drift` | regenerate / verify the chart's RBAC rules |
 | `make helm-lint` `make helm-test` `make helm-package` | strict lint, render assertions, package into `bin/` |
 | `make test-alerts` | promtool tests of `charts/herzi/files/alerts.rules.yaml` (cases in `hack/chart/alerts.test.yaml`) |
@@ -44,9 +44,12 @@ export KUBEBUILDER_ASSETS=$PWD/bin/k8s/1.37.0-linux-amd64
 
 ### CI and releases (`.github/workflows/ci.yml`)
 
-- Seven parallel jobs: `fmt-vet`, `lint`, `vuln`, `unit`, `integration`, `chart`, `image` (builds, never pushes, and warms the gha cache).
-  `.github/actions/go` is the shared Go setup with module/build caches; tool binaries and envtest assets are cached by pinned version.
-- `publish` (main only, needs all seven): version from Conventional Commits (`PaulHatch/semantic-version`), tag, release notes from the subjects,
+- Six parallel jobs: `lint` (`make fmt-check lint`; golangci's `govet` replaces a separate `go vet`), `vuln`, `unit`, `integration`, `chart`, `image`.
+  `.github/actions/go` is the shared Go setup with module/build caches. **Every job passes its own `scope`**: jobs sharing one cache key race to save it
+  and the loser's compiled output is never stored (an empty `plain` cache cost ~100 s per job once). Tool binaries and envtest assets are cached by pinned version.
+- The image is not compiled inside Docker in CI (111 s, no Go cache): `make build` runs on the runner with `GOOS=linux GOARCH=amd64`, and
+  `docker build --target prebuilt` copies `bin/manager`. The default Dockerfile target (`runtime`) still compiles in a builder stage for local `make docker-build`.
+- `publish` (main only, needs all six): version from Conventional Commits (`PaulHatch/semantic-version`), tag, release notes from the subjects,
   image `ghcr.io/team-redbull/herzi:{X.Y.Z,X.Y,X,sha-<commit>,latest}`. Nothing is tagged or pushed unless every job is green.
 - Never cancel a `main` run (`cancel-in-progress` is false there). Every action is pinned to a full commit SHA (copy the pins from `server_scan`).
 - After a push to `main`, watch the run (`gh run watch`) and report it; the first run on an empty cache is slow.

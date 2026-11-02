@@ -72,10 +72,12 @@ alert rules. Examples and tests live in `hack/chart/` and are excluded from the 
 
 ### CI and releases
 
-`.github/workflows/ci.yml` runs seven jobs in parallel on every pull request and push to `main`: `fmt-vet`, `lint`,
-`vuln`, `unit` (race tests and the coverage gate), `integration` (envtest), `chart` (Helm and alert checks, RBAC drift)
-and `image` (a build that never pushes). The Go module and build caches, the tool binaries and the envtest assets are
-cached, so the first run on an empty cache is slow and later runs are fast. A superseded branch run is cancelled; a
+`.github/workflows/ci.yml` runs six jobs in parallel on every pull request and push to `main`: `lint` (gofmt check and
+golangci-lint, which includes `go vet`), `vuln`, `unit` (race tests and the coverage gate), `integration` (envtest), `chart`
+(Helm and alert checks, RBAC drift) and `image` (builds the static binary and the image, never pushes). Each job has its own
+Go build cache, and the tool binaries and envtest assets are cached by pinned version, so the first run on an empty cache is
+slow and later runs are fast. The binary is compiled on the runner so the Go cache applies, and the Dockerfile's `prebuilt`
+target only copies it; `make docker-build` still builds everything inside Docker. A superseded branch run is cancelled; a
 `main` run never is.
 
 When every job is green on `main`, `publish` computes the next version from the Conventional Commit subjects since the

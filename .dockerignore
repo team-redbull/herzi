@@ -5,5 +5,7 @@
 !cmd/**
 !internal/
 !internal/**
+!bin/
+!bin/manager
 **/*_test.go
 **/testdata/

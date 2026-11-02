@@ -10,7 +10,7 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o /out/manager ./cmd
 
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot AS base
 ARG VERSION=dev
 ARG COMMIT=unknown
 LABEL org.opencontainers.image.title="herzi" \
@@ -20,6 +20,11 @@ LABEL org.opencontainers.image.title="herzi" \
       org.opencontainers.image.revision="${COMMIT}" \
       org.opencontainers.image.licenses="Apache-2.0"
 WORKDIR /
-COPY --from=builder /out/manager /manager
 USER 65532:65532
 ENTRYPOINT ["/manager"]
+
+FROM base AS prebuilt
+COPY bin/manager /manager
+
+FROM base AS runtime
+COPY --from=builder /out/manager /manager
