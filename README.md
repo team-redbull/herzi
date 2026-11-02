@@ -87,7 +87,7 @@ make deploy VALUES=my-hub-values.yaml IMG_REPO=registry.example.com/herzi IMG_TA
 kubectl -n herzi-system rollout status deployment/herzi
 ```
 
-Set `image.repository`, `config.hubName`, `config.installURL` and
+Set `image.repository`, `config.mceName`, `config.installURL` and
 `config.temporalAddress`; missing required values fail Helm validation before
 installation. The chart renders the ConfigMap from `config`. It creates no CRDs
 or Secrets and has no Namespace template. Helm's `--create-namespace` creates
@@ -109,9 +109,9 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 
 | Setting | Default | Scope | Meaning |
 |---|---|---|---|
-| interval | 120s | Hub | Normal requeue period |
+| interval | 60s | Hub | Normal requeue period |
 | reconcileTimeout | 60s | Hub | Overall reconcile deadline |
-| hubName | Required/site-specific | Hub | Canonical MCE name, ocp4-... |
+| mceName | Required/site-specific | Hub | Canonical MCE name, ocp4-... |
 | agentNamespace | inventory | Hub | InfraEnv/Agent namespace sent to installer |
 | installURL | Required/site-specific | Hub | Full /workflows/server-lifecycle/install-server route |
 | maxSlots | 100 | Hub | Must equal the API route slot range |
@@ -119,7 +119,7 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | stuckAfter | 2h | Hub | Startup open-run warning age; exported as herzi_stuck_after_seconds; restart to change |
 | temporalAddress | Required/site-specific | Hub | Temporal host:port (plain gRPC unless Temporal TLS is enabled) |
 | temporalNamespace | default | Hub | Temporal namespace |
-| activityQueue | server-lifecycle-activity-<hubName> | Hub | Hub activity queue, derived from hubName when not written |
+| activityQueue | server-lifecycle-activity-<mceName> | Hub | Hub activity queue, derived from mceName when not written |
 | workflowQueue | install-server-workflow | Hub | Install workflow queue |
 | segmentQueue | segment-lifecycle-activity | Hub | Segment activity queue |
 | highPct | 10 | Pool | Single target buffer percentage, integer half-up rounding |

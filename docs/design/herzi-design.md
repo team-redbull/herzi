@@ -521,9 +521,9 @@ all live under `defaults`, and every one of them can be overridden for a single 
 
 ```yaml
 # ---- hub settings (one value per hub, not overridable per pool) ----
-interval: 120s
+interval: 60s
 reconcileTimeout: 60s
-hubName: ocp4-<hub>
+mceName: ocp4-<hub>
 agentNamespace: inventory
 installURL: https://<workflows-api>/workflows/server-lifecycle/install-server
 maxSlots: 100                       # must equal the route's slot range

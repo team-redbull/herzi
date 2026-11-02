@@ -34,12 +34,12 @@ func TestShippedSampleLoads(t *testing.T) {
 }
 
 func TestQueueNamesDefaultToTheWorkflowsRepoNames(t *testing.T) {
-	cfg, err := config.Load([]byte("hubName: example\ninstallURL: https://w.example/x\ntemporalAddress: t:7233\n"))
+	cfg, err := config.Load([]byte("mceName: example\ninstallURL: https://w.example/x\ntemporalAddress: t:7233\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HubName != "ocp4-example" {
-		t.Fatalf("hub name not canonicalised: %q", cfg.HubName)
+	if cfg.MCEName != "ocp4-example" {
+		t.Fatalf("hub name not canonicalised: %q", cfg.MCEName)
 	}
 	if cfg.ActivityQueue != "server-lifecycle-activity-ocp4-example" {
 		t.Fatalf("activity queue must derive from the hub: %q", cfg.ActivityQueue)
@@ -110,7 +110,7 @@ func TestChartDefaultsMatchCode(t *testing.T) {
 	}
 	assertChartFields(t, pool, config.Defaults(), nil)
 	assertChartFields(t, document, config.DefaultHub(), map[string]bool{
-		"hubName": true, "installURL": true, "temporalAddress": true,
+		"mceName": true, "installURL": true, "temporalAddress": true,
 	})
 	if pools, ok := document["pools"].(map[string]any); !ok || len(pools) != 0 {
 		t.Fatal("chart must not opt any pools in by default")

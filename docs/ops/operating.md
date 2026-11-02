@@ -26,7 +26,7 @@ The controller pod must reach Kubernetes, Temporal's configured host:port and th
 workflows API. Set `config.installURL` to **the same full URL used today to call
 install-server**: use the Service address if the workflows brain is on this
 cluster, otherwise its Route, retaining `/workflows/server-lifecycle/install-server`.
-Do not invent a new endpoint. `config.hubName` is the canonical MCE name used in
+Do not invent a new endpoint. `config.mceName` is the canonical MCE name used in
 install requests, normally `ocp4-...`; match the hub worker queue and Temporal
 namespace. Confirm these network paths from the hub before enabling growth.
 
@@ -83,9 +83,9 @@ cp hack/chart/example-values.yaml my-hub-values.yaml
 ```
 
 Expect a local values file with three illustrative pools; edit it for this hub.
-Required values are `image.repository`, `config.hubName`, `config.installURL` and
+Required values are `image.repository`, `config.mceName`, `config.installURL` and
 `config.temporalAddress`. Replace the example endpoints and `config.activityQueue`
-(or leave the queue empty to derive it from hubName). List only the InfraEnv names
+(or leave the queue empty to derive it from mceName). List only the InfraEnv names
 to manage under `config.pools`. `dryRunGrow` defaults to `true`, so every pool starts in dry run;
 a per-pool `dryRunGrow: false` takes that pool live.
 Provision any opted-in Secrets separately in `herzi-system` before installation.
@@ -159,7 +159,7 @@ These are the 20 current top-level keys; controller fields are detailed in the
 | `resources` | Requests CPU `100m`/memory `128Mi`; limits CPU `"1"`/memory `512Mi`. |
 | `serviceAccount` | `create: true`, `name: ""`, `annotations: {}`; empty name uses release name when created, `default` otherwise. |
 | `rbac` | `create: true` gates all roles/bindings; `metricsReader.subjects: []`. |
-| `config` | `hubName: ""`, `installURL: ""`, `temporalAddress: ""` (required); `interval: 120s`, `reconcileTimeout: 60s`, `agentNamespace: inventory`, `maxSlots: 100`, `ambiguousWait: 5m`, `stuckAfter: 2h`, `temporalNamespace: default`, `activityQueue: ""` (derived), `workflowQueue: install-server-workflow`, `segmentQueue: segment-lifecycle-activity`; `defaults: {highPct: 10, minFree: 2, maxOpenRunsPerPool: 15, probeInterval: 20m, drawGrace: 2m, failureMemory: 6h, settlingMax: 60m, dryRunGrow: true, paused: false}`; `pools: {}`. |
+| `config` | `mceName: ""`, `installURL: ""`, `temporalAddress: ""` (required); `interval: 60s`, `reconcileTimeout: 60s`, `agentNamespace: inventory`, `maxSlots: 100`, `ambiguousWait: 5m`, `stuckAfter: 2h`, `temporalNamespace: default`, `activityQueue: ""` (derived), `workflowQueue: install-server-workflow`, `segmentQueue: segment-lifecycle-activity`; `defaults: {highPct: 10, minFree: 2, maxOpenRunsPerPool: 15, probeInterval: 20m, drawGrace: 2m, failureMemory: 6h, settlingMax: 60m, dryRunGrow: true, paused: false}`; `pools: {}`. |
 | `temporal` | `tls.existingSecret: ""`, `tls.caKey: ca.crt`; optional existing server CA Secret. |
 | `metrics` | HTTPS metrics Service: `enabled: true`, `port: 8443`. |
 | `serviceMonitor` | `enabled: false`, `interval: 30s`, `labels: {}`, `endpoint: {}` (raw endpoint map). |
@@ -235,7 +235,7 @@ appears; the directory mount avoids subPath so Kubernetes can refresh its conten
 needs up to about a minute). Check both the accepted-config metric and the logs after updating.
 Pool/default edits and live timing (`interval`, `reconcileTimeout`, `ambiguousWait`)
 reload without a rollout. Among controller settings, only startup-bound values
-(`hubName`, `agentNamespace`, `installURL`, `maxSlots`, `stuckAfter`,
+(`mceName`, `agentNamespace`, `installURL`, `maxSlots`, `stuckAfter`,
 `temporalAddress`, `temporalNamespace`, `activityQueue`, `workflowQueue`, `segmentQueue`)
 change `checksum/startup-config` and restart pods. Thus `helm upgrade` is safe for
 pool edits. Changes to image, Secret references or pod scheduling also change the

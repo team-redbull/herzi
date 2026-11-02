@@ -36,7 +36,7 @@ type poolInput struct {
 type configInput struct {
 	Interval          *durationText        `yaml:"interval"`
 	ReconcileTimeout  *durationText        `yaml:"reconcileTimeout"`
-	HubName           *string              `yaml:"hubName"`
+	MCEName           *string              `yaml:"mceName"`
 	AgentNamespace    *string              `yaml:"agentNamespace"`
 	InstallURL        *string              `yaml:"installURL"`
 	MaxSlots          *int                 `yaml:"maxSlots"`
@@ -87,8 +87,8 @@ func Load(data []byte) (Config, error) {
 			c.ReconcileTimeout = *d
 		}
 	}
-	if input.HubName != nil {
-		c.HubName = *input.HubName
+	if input.MCEName != nil {
+		c.MCEName = *input.MCEName
 	}
 	if input.AgentNamespace != nil {
 		c.AgentNamespace = *input.AgentNamespace
@@ -130,12 +130,12 @@ func Load(data []byte) (Config, error) {
 	if input.SegmentQueue != nil {
 		c.SegmentQueue = *input.SegmentQueue
 	}
-	c.HubName = strings.TrimSpace(c.HubName)
-	if c.HubName != "" && !strings.HasPrefix(c.HubName, "ocp4-") {
-		c.HubName = "ocp4-" + c.HubName
+	c.MCEName = strings.TrimSpace(c.MCEName)
+	if c.MCEName != "" && !strings.HasPrefix(c.MCEName, "ocp4-") {
+		c.MCEName = "ocp4-" + c.MCEName
 	}
-	if c.ActivityQueue == "" && c.HubName != "" {
-		c.ActivityQueue = activityQueuePrefix + c.HubName
+	if c.ActivityQueue == "" && c.MCEName != "" {
+		c.ActivityQueue = activityQueuePrefix + c.MCEName
 	}
 	o, err := input.Defaults.convert("defaults")
 	if err != nil {

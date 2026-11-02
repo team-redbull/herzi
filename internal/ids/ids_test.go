@@ -37,7 +37,7 @@ func TestDifferentHubsAndSlotsDiffer(t *testing.T) {
 	}
 }
 
-func TestHubPrefixDoesNotMatchExtendedHubName(t *testing.T) {
+func TestHubPrefixDoesNotMatchExtendedMCEName(t *testing.T) {
 	prefix := "install-server-ocp4-a_"
 	if !strings.HasPrefix(PoolSlot("ocp4-a", "ie", 1), prefix) {
 		t.Fatal("missing hub prefix")

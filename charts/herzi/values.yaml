@@ -15,9 +15,9 @@ rbac:
   metricsReader:
     subjects: [] # Subjects allowed to GET /metrics.
 config:
-  interval: 120s # Reconcile period; live reload.
+  interval: 60s # Reconcile period; live reload.
   reconcileTimeout: 60s # Reconcile deadline; live reload.
-  hubName: "" # Required MCE hub name.
+  mceName: "" # Required MCE hub name.
   agentNamespace: inventory # Agent/InfraEnv namespace.
   installURL: "" # Required absolute HTTP(S) install endpoint.
   maxSlots: 100 # Fixed at 100 API slots.
@@ -25,7 +25,7 @@ config:
   stuckAfter: 2h # Open-run warning age; startup-bound.
   temporalAddress: "" # Required Temporal host:port.
   temporalNamespace: default # Temporal namespace.
-  activityQueue: "" # Empty derives server-lifecycle-activity-<canonical hubName>.
+  activityQueue: "" # Empty derives server-lifecycle-activity-<canonical mceName>.
   workflowQueue: install-server-workflow # Workflow worker queue.
   segmentQueue: segment-lifecycle-activity # Segment worker queue.
   defaults:

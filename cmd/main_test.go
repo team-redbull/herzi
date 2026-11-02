@@ -22,7 +22,7 @@ import (
 
 func TestStartupBoundChanged(t *testing.T) {
 	base := config.DefaultHub()
-	base.HubName, base.InstallURL, base.TemporalAddress = "ocp4-a", "https://w/x", "t:7233"
+	base.MCEName, base.InstallURL, base.TemporalAddress = "ocp4-a", "https://w/x", "t:7233"
 	base.ActivityQueue = "server-lifecycle-activity-ocp4-a"
 
 	t.Run("identical", func(t *testing.T) {
@@ -39,11 +39,11 @@ func TestStartupBoundChanged(t *testing.T) {
 	})
 	t.Run("each bound setting is reported", func(t *testing.T) {
 		c := base
-		c.HubName, c.AgentNamespace, c.InstallURL, c.MaxSlots = "ocp4-b", "other", "https://w/y", 50
+		c.MCEName, c.AgentNamespace, c.InstallURL, c.MaxSlots = "ocp4-b", "other", "https://w/y", 50
 		c.StuckAfter = time.Hour
 		c.TemporalAddress, c.TemporalNamespace = "t2:7233", "ns"
 		c.ActivityQueue, c.WorkflowQueue, c.SegmentQueue = "a", "b", "c"
-		want := []string{"hubName", "agentNamespace", "installURL", "maxSlots", "stuckAfter", "temporalAddress",
+		want := []string{"mceName", "agentNamespace", "installURL", "maxSlots", "stuckAfter", "temporalAddress",
 			"temporalNamespace", "activityQueue", "workflowQueue", "segmentQueue"}
 		if got := startupBoundChanged(base, c); !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %v, want %v", got, want)
@@ -93,7 +93,7 @@ func (l logCapture) Error(err error, msg string, values ...any) {
 func (l logCapture) WithName(string) logr.LogSink   { return l }
 func (l logCapture) WithValues(...any) logr.LogSink { return l }
 
-const validConfig = `hubName: ocp4-a
+const validConfig = `mceName: ocp4-a
 installURL: https://example.invalid/install
 activityQueue: activity
 workflowQueue: workflow

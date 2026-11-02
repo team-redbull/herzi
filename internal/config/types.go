@@ -6,7 +6,7 @@ import "time"
 type HubConfig struct {
 	Interval         time.Duration `json:"interval"`
 	ReconcileTimeout time.Duration `json:"reconcileTimeout"`
-	HubName          string        `json:"hubName"`
+	MCEName          string        `json:"mceName"`
 	AgentNamespace   string        `json:"agentNamespace"`
 	InstallURL       string        `json:"installURL"`
 	MaxSlots         int           `json:"maxSlots"`

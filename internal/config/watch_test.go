@@ -32,14 +32,14 @@ func TestFileWatcherAppliesAndRejects(t *testing.T) {
 		t.Fatalf("an unchanged file must not call OnUpdate again: %v", calls)
 	}
 
-	if err := os.WriteFile(path, []byte("hubName: ocp4-x\nbogusKey: 1\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("mceName: ocp4-x\nbogusKey: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	w.Poll()
 	if len(calls) != 2 || calls[1] == nil || store.Valid() {
 		t.Fatalf("a bad file must be rejected and reported: calls=%v valid=%v", calls, store.Valid())
 	}
-	if store.Snapshot().HubName != cfg.HubName {
+	if store.Snapshot().MCEName != cfg.MCEName {
 		t.Fatal("a rejected update must keep the last good config")
 	}
 

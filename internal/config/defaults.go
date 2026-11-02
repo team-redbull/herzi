@@ -15,7 +15,7 @@ const (
 )
 
 func DefaultHub() HubConfig {
-	return HubConfig{Interval: 2 * time.Minute, ReconcileTimeout: time.Minute, AgentNamespace: "inventory",
+	return HubConfig{Interval: time.Minute, ReconcileTimeout: time.Minute, AgentNamespace: "inventory",
 		MaxSlots: 100, AmbiguousWait: 5 * time.Minute, StuckAfter: 2 * time.Hour,
 		TemporalNamespace: DefaultTemporalNamespaceVal, WorkflowQueue: DefaultWorkflowQueue,
 		SegmentQueue: DefaultSegmentQueue}

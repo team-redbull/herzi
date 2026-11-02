@@ -82,7 +82,7 @@ func startupBoundChanged(old, current config.HubConfig) []string {
 			changed = append(changed, name)
 		}
 	}
-	add("hubName", old.HubName != current.HubName)
+	add("mceName", old.MCEName != current.MCEName)
 	add("agentNamespace", old.AgentNamespace != current.AgentNamespace)
 	add("installURL", old.InstallURL != current.InstallURL)
 	add("maxSlots", old.MaxSlots != current.MaxSlots)
@@ -141,7 +141,7 @@ func run(args []string) int {
 		CertFile:  os.Getenv(envTemporalCert),
 		KeyFile:   os.Getenv(envTemporalKey),
 		APIKey:    os.Getenv(envTemporalAPIKey),
-		Identity:  "herzi/" + version + "@" + hub.HubName,
+		Identity:  "herzi/" + version + "@" + hub.MCEName,
 	})
 	if err != nil {
 		setupLog.Error(err, "Failed to create the Temporal client")
@@ -153,7 +153,7 @@ func run(args []string) int {
 	m.SetConfigValid(true)
 
 	sweeper := temporalx.NewSweeper(temporalx.Options{
-		Client: tc, MCE: hub.HubName, MaxSlots: hub.MaxSlots,
+		Client: tc, MCE: hub.MCEName, MaxSlots: hub.MaxSlots,
 		CacheTTL: 10 * time.Second,
 	})
 	queues := temporalx.NewQueues(temporalx.Options{
@@ -161,7 +161,7 @@ func run(args []string) int {
 		ActivityQueue: hub.ActivityQueue, WorkflowQueue: hub.WorkflowQueue, SegmentQueue: hub.SegmentQueue,
 	})
 	inst, err := installer.New(installer.Options{
-		URL: hub.InstallURL, MCECluster: hub.HubName, Namespace: hub.AgentNamespace,
+		URL: hub.InstallURL, MCECluster: hub.MCEName, Namespace: hub.AgentNamespace,
 		Timeout: installTimeout(hub.ReconcileTimeout), BearerToken: os.Getenv(envBearerToken),
 	})
 	if err != nil {
@@ -203,7 +203,7 @@ func run(args []string) int {
 	}
 
 	setupLog.Info("Starting manager", "version", version, "commit", commit,
-		"hub", hub.HubName, "agentNamespace", hub.AgentNamespace)
+		"hub", hub.MCEName, "agentNamespace", hub.AgentNamespace)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		return 1

@@ -7,7 +7,7 @@ import (
 )
 
 func TestRemovedKeyEffectiveDocument(t *testing.T) {
-	const base = "hubName: hub\ninstallURL: http://api/install\n"
+	const base = "mceName: hub\ninstallURL: http://api/install\n"
 	for _, tc := range []struct{ yaml, path, key string }{
 		{"defaults:\n  lowPct: 0", "defaults", "lowPct"},
 		{"defaults: {minBand: null}", "defaults", "minBand"},

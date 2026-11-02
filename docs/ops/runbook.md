@@ -163,7 +163,7 @@ kubectl -n herzi-system logs deployment/herzi -c manager --previous --tail=100
 
 The usual causes, in the order to check them:
 
-1. `ContainerCreating` with a `FailedMount` event: the `herzi-config` ConfigMap (or an opted-in TLS Secret) does not exist. The chart renders `herzi-config` from values. Missing `config.hubName`, `config.installURL`, `config.temporalAddress` or `image.repository` fails `helm install` validation early; a missing ConfigMap after installation indicates deletion or an incomplete release.
+1. `ContainerCreating` with a `FailedMount` event: the `herzi-config` ConfigMap (or an opted-in TLS Secret) does not exist. The chart renders `herzi-config` from values. Missing `config.mceName`, `config.installURL`, `config.temporalAddress` or `image.repository` fails `helm install` validation early; a missing ConfigMap after installation indicates deletion or an incomplete release.
 2. `CrashLoopBackOff` with `The configuration file is invalid` in the log: the log line carries the offending key; fix the site values and run `helm upgrade`.
 3. `CrashLoopBackOff` after about two minutes with `Failed to run manager` and a cache-sync error: the controller is **missing RBAC** for Agents, InfraEnvs or NodePools. Check `kubectl auth can-i list agents.agent-install.openshift.io --as=system:serviceaccount:herzi-system:herzi -n inventory` (and the same for `infraenvs` and `nodepools`).
 4. A wrong `agentNamespace`: the pod runs but sees no InfraEnvs. The metrics exist in that case, so this alert does not fire; check `herzi_pool_*` for the pools you configured.

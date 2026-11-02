@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-const reloadConfig = `hubName: ocp4-test
+const reloadConfig = `mceName: ocp4-test
 installURL: https://example.invalid/install
 activityQueue: activity
 workflowQueue: workflow
@@ -103,7 +103,7 @@ func TestOneClockAndFrozenConfig(t *testing.T) {
 	result, err := f.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(infra("p"))})
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
-	require.Equal(t, 2*time.Minute, result.RequeueAfter)
+	require.Equal(t, time.Minute, result.RequeueAfter)
 	require.Equal(t, []pipeline.InstallRequest{{Key: "p", Count: 2}}, f.install.requests)
 }
 func TestNotFoundFreshLeavesNoSeries(t *testing.T) {

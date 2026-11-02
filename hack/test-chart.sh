@@ -108,17 +108,17 @@ for mode in ['example','monitoring']:
 original=checksum(render())
 for extra in [{'config':{'pools':{'32-128-zone-1':{'minFree':6}}}},{'config':{'interval':'3m','reconcileTimeout':'50s','ambiguousWait':'6m','defaults':{'highPct':20}}}]:
     assert checksum(render(extra=extra))==original,'live config caused a restart'
-for key,value in {'hubName':'ocp4-other','agentNamespace':'other','installURL':'https://other.invalid/install','stuckAfter':'3h','temporalAddress':'other:7233','temporalNamespace':'other','activityQueue':'other-a','workflowQueue':'other-w','segmentQueue':'other-s'}.items():
+for key,value in {'mceName':'ocp4-other','agentNamespace':'other','installURL':'https://other.invalid/install','stuckAfter':'3h','temporalAddress':'other:7233','temporalNamespace':'other','activityQueue':'other-a','workflowQueue':'other-w','segmentQueue':'other-s'}.items():
     assert checksum(render(extra={'config':{key:value}}))!=original,key+' did not cause a restart'
 import hashlib
-startup={k:merged(base,example)['config'][k] for k in ['hubName','agentNamespace','installURL','maxSlots','stuckAfter','temporalAddress','temporalNamespace','activityQueue','workflowQueue','segmentQueue']}
+startup={k:merged(base,example)['config'][k] for k in ['mceName','agentNamespace','installURL','maxSlots','stuckAfter','temporalAddress','temporalNamespace','activityQueue','workflowQueue','segmentQueue']}
 assert original==hashlib.sha256(json.dumps(startup,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 docs=render(extra={'rbac':{'create':False},'serviceAccount':{'create':False,'name':'existing'},'metrics':{'enabled':False}})
 assert not any(d['kind'] in ['Role','RoleBinding','ClusterRole','ClusterRoleBinding','ServiceAccount','Service'] for d in docs)
 assert pod(docs)['spec']['serviceAccountName']=='existing'
 result=run(['template','herzi',str(chart)])
 assert result.returncode!=0
-for key in ['hubName','installURL','temporalAddress','repository']:assert key in result.stderr,result.stderr
+for key in ['mceName','installURL','temporalAddress','repository']:assert key in result.stderr,result.stderr
 def invalid(extra,words):
     with tempfile.NamedTemporaryFile(mode='w',suffix='.yaml') as f:
         yaml.safe_dump(extra,f);f.flush()

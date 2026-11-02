@@ -1,7 +1,7 @@
 # Part 2, Config example, with concrete endpoints and required queue settings.
-interval: 120s
+interval: 60s
 reconcileTimeout: 60s
-hubName: ocp4-bat-yam-01
+mceName: ocp4-bat-yam-01
 agentNamespace: inventory
 installURL: https://workflows-api.example.com/workflows/server-lifecycle/install-server
 maxSlots: 100

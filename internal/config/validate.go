@@ -32,10 +32,10 @@ func (c Config) validateDocument() error {
 			problems = append(problems, fmt.Errorf("%s: %s", field, rule))
 		}
 	}
-	check(strings.TrimSpace(c.HubName) != "" &&
-		strings.HasPrefix(c.HubName,
+	check(strings.TrimSpace(c.MCEName) != "" &&
+		strings.HasPrefix(c.MCEName,
 			"ocp4-"),
-		"hubName",
+		"mceName",
 		"must be non-empty and canonical (ocp4- prefix)")
 	u, err := url.Parse(c.InstallURL)
 	check(err == nil &&

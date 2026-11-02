@@ -15,7 +15,7 @@ import (
 
 var _ pipeline.Settings = config.Config{}
 
-const minimal = `hubName: bat-yam-01
+const minimal = `mceName: bat-yam-01
 installURL: https://workflows.example.com/install
 activityQueue: activities
 workflowQueue: workflows
@@ -62,8 +62,8 @@ func TestLoad(t *testing.T) {
 		{"empty duration", minimal + "interval: ''\n", "interval"},
 		{"empty file", "", "decode config"},
 		{"comments only", "# empty\n", "decode config"},
-		{"empty object", "{}", "hubName"},
-		{"null", "null", "hubName"},
+		{"empty object", "{}", "mceName"},
+		{"null", "null", "mceName"},
 		{"empty pool", minimal + "pools: {test: {}}\n", ""},
 		{"missing defaults fields", minimal + "defaults: {minFree: 0}\n", ""},
 		{"yaml syntax", minimal + "pools: [\n", "decode config"},
@@ -72,7 +72,7 @@ func TestLoad(t *testing.T) {
 		{"second document", minimal + "---\n{}\n", "exactly one"},
 		{"bad second document", minimal + "---\n[\n", "trailing document"},
 		{"noncanonical input", strings.ReplaceAll(minimal, "bat-yam-01", "  bat-yam-01  "), ""},
-		{"blank hub", strings.ReplaceAll(minimal, "bat-yam-01", "'   '"), "hubName"},
+		{"blank hub", strings.ReplaceAll(minimal, "bat-yam-01", "'   '"), "mceName"},
 		{"prefixed input", strings.ReplaceAll(minimal, "bat-yam-01", "ocp4-bat-yam-01"), ""},
 	}
 	for _, tt := range tests {
@@ -85,15 +85,15 @@ func TestLoad(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.HubName != "ocp4-bat-yam-01" {
-				t.Fatalf("hubName = %q", c.HubName)
+			if c.MCEName != "ocp4-bat-yam-01" {
+				t.Fatalf("mceName = %q", c.MCEName)
 			}
 			if err := c.Validate(); err != nil {
 				t.Fatal(err)
 			}
 			if tt.name == "minimal" {
 				hub := config.DefaultHub()
-				hub.HubName = c.HubName
+				hub.MCEName = c.MCEName
 				hub.InstallURL = c.InstallURL
 				hub.ActivityQueue = "activities"
 				hub.WorkflowQueue = "workflows"
@@ -159,7 +159,7 @@ func TestGoldenSample(t *testing.T) {
 		t.Fatal(err)
 	}
 	hub := config.DefaultHub()
-	hub.HubName = "ocp4-bat-yam-01"
+	hub.MCEName = "ocp4-bat-yam-01"
 	hub.InstallURL = "https://workflows-api.example.com/workflows/server-lifecycle/install-server"
 	hub.TemporalAddress = "temporal.example.com:7233"
 	hub.TemporalNamespace = "default"
@@ -284,7 +284,7 @@ func TestValidateHubRules(t *testing.T) {
 		field     string
 		bad, good any
 	}{
-		{"HubName", "", "ocp4-hub"}, {"HubName", "hub", "ocp4-hub"},
+		{"MCEName", "", "ocp4-hub"}, {"MCEName", "hub", "ocp4-hub"},
 		{"InstallURL", "relative/path", "http://example.com/path"}, {"InstallURL", "ftp://example.com", "https://example.com"},
 		{"InstallURL", "http:///path", "http://example.com"}, {"InstallURL", "https://%zz", "https://example.com"},
 		{"Interval", time.Duration(0), time.Second}, {"ReconcileTimeout", time.Duration(-1), time.Second},
@@ -298,7 +298,11 @@ func TestValidateHubRules(t *testing.T) {
 			c := validConfig(t)
 			field := reflect.ValueOf(&c.HubConfig).Elem().FieldByName(tt.field)
 			field.Set(reflect.ValueOf(tt.bad))
-			requireError(t, c.Validate(), strings.ToLower(tt.field[:1])+tt.field[1:])
+			key := strings.ToLower(tt.field[:1]) + tt.field[1:]
+			if tt.field == "MCEName" {
+				key = "mceName"
+			}
+			requireError(t, c.Validate(), key)
 			field.Set(reflect.ValueOf(tt.good))
 			if err := c.Validate(); err != nil {
 				t.Fatal(err)
@@ -313,12 +317,12 @@ func TestValidateHubRules(t *testing.T) {
 
 func TestValidationCollectsAllProblems(t *testing.T) {
 	c := validConfig(t)
-	c.HubName = ""
+	c.MCEName = ""
 	c.Interval = 0
 	c.Defaults.MinFree = -1
 	c.Pools = map[string]config.PoolOverride{"z": {HighPct: new(-2)}, "a": {MinFree: new(-3)}}
 	err := c.Validate()
-	requireError(t, err, "hubName", "interval", "defaults", "minFree", `pool "z"`, "highPct", `pool "a"`, "minFree")
+	requireError(t, err, "mceName", "interval", "defaults", "minFree", `pool "z"`, "highPct", `pool "a"`, "minFree")
 	joined, ok := err.(interface{ Unwrap() []error })
 	if !ok || len(joined.Unwrap()) < 3 {
 		t.Fatal("must join every problem")
@@ -329,7 +333,7 @@ func TestValidationCollectsAllProblems(t *testing.T) {
 }
 
 func TestLoadHubOverrides(t *testing.T) {
-	c, err := config.Load([]byte(`hubName: '  ocp4-custom  '
+	c, err := config.Load([]byte(`mceName: '  ocp4-custom  '
 installURL: http://example.com/install
 interval: 3m
 reconcileTimeout: 90s
@@ -346,7 +350,7 @@ segmentQueue: s
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := config.HubConfig{HubName: "ocp4-custom", InstallURL: "http://example.com/install", Interval: 3 * time.Minute,
+	want := config.HubConfig{MCEName: "ocp4-custom", InstallURL: "http://example.com/install", Interval: 3 * time.Minute,
 		ReconcileTimeout: 90 * time.Second, AgentNamespace: "custom", MaxSlots: 100, AmbiguousWait: 10 * time.Minute, StuckAfter: 3 * time.Hour,
 		TemporalAddress: "localhost:7233", TemporalNamespace: "custom", ActivityQueue: "a", WorkflowQueue: "w", SegmentQueue: "s"}
 	if diff := cmp.Diff(want, c.HubConfig); diff != "" {
