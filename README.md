@@ -65,20 +65,36 @@ make ci  # lint, vet, unit tests, vuln, helm-lint, helm-test, test-alerts, manif
 ```
 
 `make ci` excludes integration tests and image builds; CI runs those in separate
-jobs. `make helm-test` asserts chart rendering and the exact package contents locally.
+jobs (see [CI and releases](#ci-and-releases)). `make helm-test` asserts chart rendering and the exact package contents locally.
 `make helm-package` produces the 20-file chart archive in `bin/`: chart metadata,
 defaults, schema, `.helmignore`, 14 template/helper files, generated RBAC and native
 alert rules. Examples and tests live in `hack/chart/` and are excluded from the package.
 
+### CI and releases
+
+`.github/workflows/ci.yml` runs seven jobs in parallel on every pull request and push to `main`: `fmt-vet`, `lint`,
+`vuln`, `unit` (race tests and the coverage gate), `integration` (envtest), `chart` (Helm and alert checks, RBAC drift)
+and `image` (a build that never pushes). The Go module and build caches, the tool binaries and the envtest assets are
+cached, so the first run on an empty cache is slow and later runs are fast. A superseded branch run is cancelled; a
+`main` run never is.
+
+When every job is green on `main`, `publish` computes the next version from the Conventional Commit subjects since the
+last `vX.Y.Z` tag (`feat!:` or a `BREAKING CHANGE:` footer is major, `feat:` minor, anything else patch), tags it,
+creates a GitHub release whose notes are those subjects, and pushes the image to
+`ghcr.io/team-redbull/herzi` as `X.Y.Z`, `X.Y`, `X`, `sha-<commit>` and `latest`. Nothing is tagged or pushed unless
+all jobs pass. Deploy a full version, for example `--set image.tag=0.1.1`.
+
 Choose the target hub deliberately, with the external Agent, InfraEnv and NodePool
 CRDs already installed. Review [RBAC](docs/ops/rbac.md). Copy the example values,
-replace its illustrative endpoints, registry, canonical MCE hub name and pools,
-and leave `dryRunGrow` at its default `true` until you have read the `Would install` logs.
+replace its illustrative endpoints, registry and canonical MCE name (`mceName`), and list pools only to override
+settings. Every InfraEnv is managed by default; label one with `herzi.redbull.io/ignore` (or set
+`pools.<name>.exclude: true`) to skip it. Leave `dryRunGrow` at its default `true` until you have read the
+`Would install` logs. For a private Temporal CA, paste the PEM into `temporal.tls.caCert`; the chart creates the Secret.
 
 ```bash
 cp hack/chart/example-values.yaml my-hub-values.yaml
-make docker-build IMG=registry.example.com/herzi:0.1.0 VERSION=0.1.0 COMMIT=unknown
-make docker-push IMG=registry.example.com/herzi:0.1.0
+# Image: CI publishes ghcr.io/team-redbull/herzi:<version>; to build by hand instead:
+# make docker-build docker-push IMG=registry.example.com/herzi:0.1.0 VERSION=0.1.0 COMMIT=unknown
 helm template herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set image.tag=0.1.0
 helm upgrade --install herzi charts/herzi -n herzi-system --create-namespace \
   -f my-hub-values.yaml --set image.tag=0.1.0
@@ -289,7 +305,7 @@ preceding `herzi_pool_` prefix (for example `_assigned` means `herzi_pool_assign
 | `herzi_stuck_after_seconds` | gauge | none | Startup stuckAfter threshold in seconds; process constant |
 | `herzi_oldest_open_run_seconds` | gauge | pool | for the stuck-run alert |
 | `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`) | poller counts |
-| `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, ...) |
+| `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, pool override matching no InfraEnv, ...) |
 | `herzi_config_valid` | gauge 0/1 | — | last config update accepted |
 | `herzi_last_successful_reconcile_timestamp_seconds` | gauge | pool | liveness of a pool |
 

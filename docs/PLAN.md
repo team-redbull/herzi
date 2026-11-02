@@ -137,7 +137,7 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 | `herzi_stuck_after_seconds` | gauge | none | startup-configured open-run alert threshold in seconds (process constant) |
 | `herzi_oldest_open_run_seconds` | gauge | pool | for the stuck-run alert |
 | `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`) | poller counts |
-| `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, ...) |
+| `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, pool override matching no InfraEnv, ...) |
 | `herzi_config_valid` | gauge 0/1 | — | last config update accepted |
 | `herzi_last_successful_reconcile_timestamp_seconds` | gauge | pool | liveness of a pool |
 

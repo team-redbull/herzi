@@ -82,7 +82,7 @@ before starting it; the builder also needs a reachable Go module source/cache.
 cp hack/chart/example-values.yaml my-hub-values.yaml
 ```
 
-Expect a local values file with three illustrative pools; edit it for this hub.
+Expect a local values file with three illustrative pool overrides; edit it for this hub.
 Required values are `image.repository`, `config.mceName`, `config.installURL` and
 `config.temporalAddress`. Replace the example endpoints and `config.activityQueue`
 (or leave the queue empty to derive it from mceName). Every InfraEnv in `agentNamespace` is managed by
@@ -245,6 +245,25 @@ pod template and cause a rollout.
 helm upgrade herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set image.tag=0.1.0
 kubectl -n herzi-system logs deployment/herzi -c manager --since=10m
 ```
+
+To stop herzi looking at an InfraEnv altogether (it is then not read, ordered for, measured or requeued, and its
+NodePools and Agents are not counted), label it, or exclude it in config:
+
+```bash
+kubectl -n inventory label infraenvs.agent-install.openshift.io legacy-zone-3 herzi.redbull.io/ignore=true
+# Start managing it again:
+kubectl -n inventory label infraenvs.agent-install.openshift.io legacy-zone-3 herzi.redbull.io/ignore-
+```
+
+```yaml
+config:
+  ignoreLabel: herzi.redbull.io/ignore   # the label key; any value ignores
+  pools:
+    legacy-zone-3: {exclude: true}       # same effect, from config (never under defaults)
+```
+
+Every other InfraEnv is managed with the defaults, and `pools` only holds overrides. A name under `pools` that
+matches no InfraEnv is reported on each config reload (`herzi_warnings_total{kind="pool override matches no InfraEnv"}`).
 
 To pause only one InfraEnv without changing config:
 

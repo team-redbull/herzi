@@ -13,6 +13,7 @@ MCE hub it keeps each InfraEnv's pool of spare machines matched to HyperShift No
   failure never permits a full order.
 - **Never push, open a PR or change a remote** unless the user asks. Commit locally only when asked.
 - **Commit and PR text carries only the real description**: no `Co-Authored-By` and no "Generated with" lines.
+- **Commits are authored as `TomerKarniol <tomer.karniol@gmail.com>`** (see the global CLAUDE.md); check `git log --format="%an <%ae>" -1` before pushing.
 - **Commit subjects are Conventional Commits** (`feat:`, `fix:`, `docs:`, `feat!:`): CI derives the release version and image tag from them.
 - **Deploy with the Helm chart only** (`charts/herzi`). No kustomize, no `config/` tree.
 - **Read Agent, InfraEnv and NodePool as unstructured** through the views in `internal/kube`. Do not import the typed
@@ -40,6 +41,15 @@ export KUBEBUILDER_ASSETS=$PWD/bin/k8s/1.37.0-linux-amd64
 | `make test-alerts` | promtool tests of `charts/herzi/files/alerts.rules.yaml` (cases in `hack/chart/alerts.test.yaml`) |
 | `make ci` | lint, vet, test, vuln, chart and alert checks, drift |
 | `make deploy VALUES= IMG_REPO= IMG_TAG=` / `make undeploy` | `helm upgrade --install` / `helm uninstall` |
+
+### CI and releases (`.github/workflows/ci.yml`)
+
+- Seven parallel jobs: `fmt-vet`, `lint`, `vuln`, `unit`, `integration`, `chart`, `image` (builds, never pushes, and warms the gha cache).
+  `.github/actions/go` is the shared Go setup with module/build caches; tool binaries and envtest assets are cached by pinned version.
+- `publish` (main only, needs all seven): version from Conventional Commits (`PaulHatch/semantic-version`), tag, release notes from the subjects,
+  image `ghcr.io/team-redbull/herzi:{X.Y.Z,X.Y,X,sha-<commit>,latest}`. Nothing is tagged or pushed unless every job is green.
+- Never cancel a `main` run (`cancel-in-progress` is false there). Every action is pinned to a full commit SHA (copy the pins from `server_scan`).
+- After a push to `main`, watch the run (`gh run watch`) and report it; the first run on an empty cache is slow.
 
 ### The gate (run all of it after any change; agent reports are not proof)
 

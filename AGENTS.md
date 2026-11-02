@@ -148,7 +148,7 @@ make ci                # lint, vet, test, vuln, helm-lint, helm-test, test-alert
 make run               # Run locally (uses current kubeconfig context)
 ```
 
-Unit tests use standard Go testing. The controller envtest suite uses Ginkgo + Gomega; check its `suite_test.go` for setup. CI runs integration and image builds separately from `make ci`.
+Unit tests use standard Go testing. The controller envtest suite uses Ginkgo + Gomega; check its `suite_test.go` for setup. CI runs seven parallel jobs (fmt-vet, lint, vuln, unit, integration, chart, image) and, on `main`, a `publish` job that tags a release from Conventional Commit subjects and pushes `ghcr.io/team-redbull/herzi`; see README "CI and releases".
 
 ## Deployment Workflow
 
@@ -269,6 +269,8 @@ Install with `make deploy VALUES=site-values.yaml IMG_REPO=registry.example.com/
 Package with `make helm-package`.
 
 ### Publish Container Image
+
+CI publishes `ghcr.io/team-redbull/herzi` on every green push to `main`. By hand:
 
 ```bash
 export IMG=registry.example.com/herzi:0.1.0
