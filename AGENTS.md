@@ -253,13 +253,13 @@ Generated code includes: status conditions (`metav1.Condition`), finalizers, own
 ### Helm Chart
 
 The deployment contract is `charts/herzi/values.yaml`, `charts/herzi/values.schema.json`
-and `docs/ops/operating.md`. The packaged chart contains exactly 19 files: metadata,
-defaults, schema, `.helmignore`, 13 template/helper files and two rules files.
+and `docs/ops/operating.md`. The packaged chart contains exactly 20 files: metadata,
+defaults, schema, `.helmignore`, 14 template/helper files and two rules files.
 Examples and alert tests live in `hack/chart/` outside the package.
 Copy the example values and replace hub identity, install endpoint, Temporal address,
 image repository and pools. Pools start in dry run (`dryRunGrow` defaults to true); set it false per pool to go live. The
 chart renders the ConfigMap and validates required values before installation.
-It creates no Secrets, CRDs or Namespace templates. Helm can create the namespace;
+It creates no CRDs or Namespace templates; its only Secret holds the Temporal CA when `temporal.tls.caCert` is set. Helm can create the namespace;
 uninstall leaves that namespace and external Secrets intact. Pool and live timing
 edits reload without restarting the pod; startup-bound config changes alter the
 pod checksum. Never broaden the generated manager role beyond read/InfraEnv patch

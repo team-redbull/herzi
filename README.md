@@ -66,8 +66,8 @@ make ci  # lint, vet, unit tests, vuln, helm-lint, helm-test, test-alerts, manif
 
 `make ci` excludes integration tests and image builds; CI runs those in separate
 jobs. `make helm-test` asserts chart rendering and the exact package contents locally.
-`make helm-package` produces the 19-file chart archive in `bin/`: chart metadata,
-defaults, schema, `.helmignore`, 13 template/helper files, generated RBAC and native
+`make helm-package` produces the 20-file chart archive in `bin/`: chart metadata,
+defaults, schema, `.helmignore`, 14 template/helper files, generated RBAC and native
 alert rules. Examples and tests live in `hack/chart/` and are excluded from the package.
 
 Choose the target hub deliberately, with the external Agent, InfraEnv and NodePool
@@ -90,7 +90,7 @@ kubectl -n herzi-system rollout status deployment/herzi
 Set `image.repository`, `config.mceName`, `config.installURL` and
 `config.temporalAddress`; missing required values fail Helm validation before
 installation. The chart renders the ConfigMap from `config`. It creates no CRDs
-or Secrets and has no Namespace template. Helm's `--create-namespace` creates
+and has no Namespace template. Its only Secret is the Temporal CA from `temporal.tls.caCert`, when you set it. Helm's `--create-namespace` creates
 the release namespace, which uninstall preserves. Never install `test/crds` on
 a real hub. See [Install on OpenShift](docs/ops/operating.md#install-on-openshift)
 for binary builds, credentials, monitoring, upgrades and uninstall.

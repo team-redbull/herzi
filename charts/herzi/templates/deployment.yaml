@@ -18,7 +18,7 @@ spec:
       labels:
         {{- toYaml (merge (include "herzi.labels" . | fromYaml) .Values.podLabels) | nindent 8 }}
       annotations:
-        {{- toYaml (merge (dict "checksum/startup-config" (include "herzi.startupChecksum" .)) .Values.podAnnotations) | nindent 8 }}
+        {{- toYaml (merge (dict "checksum/startup-config" (include "herzi.startupChecksum" .) "checksum/temporal-ca" (.Values.temporal.tls.caCert | default "" | sha256sum)) .Values.podAnnotations) | nindent 8 }}
     spec:
       serviceAccountName: {{ include "herzi.serviceAccount" . }}
       terminationGracePeriodSeconds: 30
@@ -68,7 +68,7 @@ spec:
             periodSeconds: 10
           env:
             - {name: GOMEMLIMIT, value: {{ .Values.goMemLimit | quote }}}
-            {{- if .Values.temporal.tls.existingSecret }}
+            {{- if include "herzi.temporalCASecret" . }}
             - {name: HERZI_TEMPORAL_TLS_CA_FILE, value: {{ printf "/etc/herzi-temporal/%s" .Values.temporal.tls.caKey | quote }}}
             {{- end }}
             {{- with .Values.extraEnv }}
@@ -76,7 +76,7 @@ spec:
             {{- end }}
           volumeMounts:
             - {name: config, mountPath: /etc/herzi, readOnly: true}
-            {{- if .Values.temporal.tls.existingSecret }}
+            {{- if include "herzi.temporalCASecret" . }}
             - {name: temporal-tls, mountPath: /etc/herzi-temporal, readOnly: true}
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -86,10 +86,10 @@ spec:
         - name: config
           configMap:
             name: {{ .Release.Name }}-config
-        {{- if .Values.temporal.tls.existingSecret }}
+        {{- if include "herzi.temporalCASecret" . }}
         - name: temporal-tls
           secret:
-            secretName: {{ .Values.temporal.tls.existingSecret | quote }}
+            secretName: {{ include "herzi.temporalCASecret" . | quote }}
             defaultMode: 0444
         {{- end }}
         {{- with .Values.extraVolumes }}

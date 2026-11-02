@@ -11,6 +11,9 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- define "herzi.serviceAccount" -}}
 {{- if .Values.serviceAccount.create }}{{ default (.Release.Name) .Values.serviceAccount.name }}{{- else }}{{ default "default" .Values.serviceAccount.name }}{{- end }}
 {{- end }}
+{{- define "herzi.temporalCASecret" -}}
+{{- if .Values.temporal.tls.existingSecret -}}{{ .Values.temporal.tls.existingSecret }}{{- else if .Values.temporal.tls.caCert -}}{{ .Release.Name }}-temporal-ca{{- end -}}
+{{- end }}
 {{- define "herzi.startupChecksum" -}}
 {{- pick .Values.config "mceName" "agentNamespace" "installURL" "maxSlots" "stuckAfter" "temporalAddress" "temporalNamespace" "activityQueue" "workflowQueue" "segmentQueue" | toJson | sha256sum }}
 {{- end }}

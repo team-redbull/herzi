@@ -42,8 +42,9 @@ config:
   pools: {} # Optional per-InfraEnv overrides; every other InfraEnv uses the defaults. exclude: true ignores one.
 temporal:
   tls:
-    existingSecret: ""
-    caKey: ca.crt
+    caCert: "" # PEM text of the CA that signed Temporal; the chart creates the Secret. Pod restarts when it changes.
+    existingSecret: "" # Alternative to caCert: a Secret you created yourself (not both).
+    caKey: ca.crt # Key inside the Secret holding the CA.
 metrics:
   enabled: true # HTTPS metrics Service.
   port: 8443

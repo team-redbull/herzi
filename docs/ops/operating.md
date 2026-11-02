@@ -160,7 +160,7 @@ These are the 20 current top-level keys; controller fields are detailed in the
 | `serviceAccount` | `create: true`, `name: ""`, `annotations: {}`; empty name uses release name when created, `default` otherwise. |
 | `rbac` | `create: true` gates all roles/bindings; `metricsReader.subjects: []`. |
 | `config` | `mceName: ""`, `installURL: ""`, `temporalAddress: ""` (required); `interval: 60s`, `reconcileTimeout: 60s`, `agentNamespace: inventory`, `maxSlots: 100`, `ambiguousWait: 5m`, `stuckAfter: 2h`, `temporalNamespace: default`, `activityQueue: ""` (derived), `workflowQueue: install-server-workflow`, `segmentQueue: segment-lifecycle-activity`; `defaults: {highPct: 10, minFree: 2, maxOpenRunsPerPool: 15, probeInterval: 20m, drawGrace: 2m, failureMemory: 6h, settlingMax: 60m, dryRunGrow: true, paused: false}`; `ignoreLabel: herzi.redbull.io/ignore`; `pools: {}`. |
-| `temporal` | `tls.existingSecret: ""`, `tls.caKey: ca.crt`; optional existing server CA Secret. |
+| `temporal` | `tls.caCert: ""` (PEM; the chart creates the Secret), `tls.existingSecret: ""` (alternative, not both), `tls.caKey: ca.crt`. |
 | `metrics` | HTTPS metrics Service: `enabled: true`, `port: 8443`. |
 | `serviceMonitor` | `enabled: false`, `interval: 30s`, `labels: {}`, `endpoint: {}` (raw endpoint map). |
 | `prometheusRule` | Shipped alerts: `enabled: false`, `labels: {}`. |
@@ -338,12 +338,26 @@ and ignores only pool, keeping each controller's threshold separate. The rule us
 
 ## Secrets, TLS and secure monitoring
 
-The chart never creates Secrets. Create references in the release namespace using
-your secret manager; never put credentials in values or the ConfigMap. With no
+The only Secret the chart creates is the Temporal CA (below); it holds a public certificate, not a credential.
+For anything secret (API keys, client keys, tokens) create the Secret in the release namespace
+with your secret manager and reference it; never put credentials in values or the ConfigMap. With no
 Secret references, Temporal uses plaintext gRPC and metrics use a self-signed
 certificate. Examples below are separate additions to your hub values.
 
-Temporal TLS verifies the server with the existing Secret's `ca.crt`:
+Temporal TLS verifies the server against a CA you give in the values. Paste the PEM text and the chart
+creates the Secret (`<release>-temporal-ca`) and mounts it; the pod restarts when the certificate changes:
+
+```yaml
+temporal:
+  tls:
+    caCert: |
+      -----BEGIN CERTIFICATE-----
+      MIID...
+      -----END CERTIFICATE-----
+```
+
+Or, with `--set-file`, `helm upgrade --install ... --set-file temporal.tls.caCert=./temporal-ca.pem`.
+To use a Secret you manage yourself instead (set either `caCert` or `existingSecret`, never both):
 
 ```yaml
 temporal:

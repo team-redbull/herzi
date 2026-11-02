@@ -298,14 +298,37 @@
         "tls": {
           "type": "object",
           "properties": {
+            "caCert": {
+              "type": "string",
+              "pattern": "^$|^\\s*-----BEGIN CERTIFICATE-----"
+            },
             "existingSecret": {
               "type": "string"
             },
             "caKey": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "if": {
+            "required": [
+              "caCert"
+            ],
+            "properties": {
+              "caCert": {
+                "minLength": 1
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "existingSecret": {
+                "maxLength": 0,
+                "description": "set caCert or existingSecret, not both"
+              }
+            }
+          }
         }
       },
       "additionalProperties": false

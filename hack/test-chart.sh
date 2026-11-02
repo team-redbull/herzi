@@ -6,7 +6,7 @@ for values in example monitoring; do
   "$HELM" lint --strict charts/herzi -f "hack/chart/$values-values.yaml"
 done
 python3 - <<'PY'
-import copy,json,os,subprocess,tempfile
+import base64,copy,json,os,subprocess,tempfile
 from pathlib import Path
 import yaml
 chart=Path('charts/herzi')
@@ -149,6 +149,21 @@ assert pod(docs)['spec']['containers'][0]['image']==example['image']['repository
 docs=render(extra={'temporal':{'tls':{'existingSecret':'custom-ca','caKey':'root.pem'}}})
 assert next(e for e in pod(docs)['spec']['containers'][0]['env'] if e['name']=='HERZI_TEMPORAL_TLS_CA_FILE')['value']=='/etc/herzi-temporal/root.pem'
 assert next(v for v in pod(docs)['spec']['volumes'] if v['name']=='temporal-tls')['secret']['secretName']=='custom-ca'
+CERT='-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIJAKHBfpegPjMCMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnRl\nc3QtY2EwHhcNMjUwMTAxMDAwMDAwWhcNMzUwMTAxMDAwMDAwWjARMQ8wDQYDVQQD\n-----END CERTIFICATE-----\n'
+docs=render(extra={'temporal':{'tls':{'caCert':CERT}}})
+secret=next(d for d in docs if d['kind']=='Secret')
+assert secret['metadata']['name']=='herzi-temporal-ca' and secret['metadata']['namespace']==namespace
+assert base64.b64decode(secret['data']['ca.crt']).decode()==CERT
+assert next(v for v in pod(docs)['spec']['volumes'] if v['name']=='temporal-tls')['secret']['secretName']=='herzi-temporal-ca'
+assert next(e for e in pod(docs)['spec']['containers'][0]['env'] if e['name']=='HERZI_TEMPORAL_TLS_CA_FILE')['value']=='/etc/herzi-temporal/ca.crt'
+first=pod(docs)['metadata']['annotations']['checksum/temporal-ca']
+docs=render(extra={'temporal':{'tls':{'caCert':CERT+'#changed\n'}}})
+assert pod(docs)['metadata']['annotations']['checksum/temporal-ca']!=first,'a new CA must restart the pod'
+docs=render(extra={'temporal':{'tls':{'caCert':CERT,'caKey':'root.pem'}}})
+assert 'root.pem' in next(d for d in docs if d['kind']=='Secret')['data']
+assert not [d for d in render() if d['kind']=='Secret'],'no Secret unless a CA is supplied'
+invalid({'temporal':{'tls':{'caCert':CERT,'existingSecret':'custom-ca'}}},['existingSecret'])
+invalid({'temporal':{'tls':{'caCert':'not a certificate'}}},['caCert'])
 for kind,key in [('ServiceMonitor','serviceMonitor'),('PrometheusRule','prometheusRule')]:
     docs=render(extra={key:{'enabled':True}})
     assert any(d['kind']==kind for d in docs)
@@ -183,7 +198,7 @@ with tempfile.TemporaryDirectory() as directory:
     archive=next(Path(directory).glob('*.tgz'))
     result=subprocess.run(['tar','-tzf',str(archive)],text=True,capture_output=True,check=True)
     expected=['Chart.yaml','values.yaml','values.schema.json','.helmignore']
-    expected += ['templates/'+name for name in ['NOTES.txt','_helpers.tpl','serviceaccount.yaml','clusterrole.yaml','clusterrolebinding.yaml','role.yaml','rolebinding.yaml','metrics-auth.yaml','configmap.yaml','deployment.yaml','service.yaml','servicemonitor.yaml','prometheusrule.yaml']]
+    expected += ['templates/'+name for name in ['NOTES.txt','_helpers.tpl','serviceaccount.yaml','clusterrole.yaml','clusterrolebinding.yaml','role.yaml','rolebinding.yaml','metrics-auth.yaml','temporal-ca-secret.yaml','configmap.yaml','deployment.yaml','service.yaml','servicemonitor.yaml','prometheusrule.yaml']]
     expected += ['files/rbac-rules.yaml','files/alerts.rules.yaml']
     assert sorted(result.stdout.splitlines())==sorted('herzi/'+name for name in expected),result.stdout
     print('Package allowlist passed: '+str(len(expected))+' files')
