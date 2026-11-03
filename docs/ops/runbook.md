@@ -76,6 +76,8 @@ Inspect the latest failed slot close event in Temporal and the install worker lo
 
 ## Reading the herzi log
 
+At startup herzi says whether it is in dry run (`Dry run is ON by default` / `Dry run is OFF by default`, with the pools that differ), and `Dry run changed` is logged when a reload turns it on or off, for the default or for a single pool.
+
 Logs are JSON. Failures are `level: error` with their own message and the real cause; intended states are `info`.
 An error is logged when it first appears or changes and then again every five minutes while it lasts; a hub-wide
 problem (Temporal, queues) is logged once, not per pool. Credentials, URL user info and query strings are masked.

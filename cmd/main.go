@@ -124,6 +124,7 @@ func run(args []string) int {
 	}
 	store := config.NewStore(initial)
 	hub := initial.HubConfig
+	logDryRun(setupLog, initial)
 
 	metricsServerOptions := metricsOptions(o)
 
@@ -228,12 +229,25 @@ func managerOptions(
 // Keep the timeout positive; zero would activate the installer's unrelated 30s default.
 func installTimeout(timeout time.Duration) time.Duration { return max(time.Nanosecond, timeout/2) }
 
+// logDryRun states at startup and after every change whether herzi orders machines for real.
+func logDryRun(logger logr.Logger, c config.Config) {
+	def, differing := c.DryRunSummary()
+	if def {
+		logger.Info("Dry run is ON by default: pools only log \"Would install\" and order nothing",
+			"dryRunGrow", true, "poolsOrderingForReal", differing)
+		return
+	}
+	logger.Info("Dry run is OFF by default: pools place REAL install orders",
+		"dryRunGrow", false, "poolsInDryRun", differing)
+}
+
 func reloadHandler(
 	hub config.HubConfig, store *config.Store, m *metrics.Metrics,
 	reload chan<- event.GenericEvent, logger logr.Logger, path string,
 ) func(error) {
 	var mu sync.Mutex
 	lastRestart := ""
+	previous := store.Snapshot()
 	return func(err error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -255,6 +269,15 @@ func reloadHandler(
 			logger.Info("Hub settings changed that need a restart to apply", "settings", changed)
 		}
 		lastRestart = key
+		current := store.Snapshot()
+		changes := config.DryRunChanges(previous, current)
+		for _, change := range changes {
+			logger.Info("Dry run changed", "change", change)
+		}
+		if len(changes) > 0 {
+			logDryRun(logger, current)
+		}
+		previous = current
 		select {
 		case reload <- event.GenericEvent{Object: &unstructured.Unstructured{}}:
 		default:

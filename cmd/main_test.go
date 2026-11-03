@@ -271,3 +271,33 @@ func TestMergedRemovedKeysStartupAndReload(t *testing.T) {
 		})
 	}
 }
+
+func TestDryRunIsLoggedAtStartupAndWhenItChanges(t *testing.T) {
+	initial, err := config.Load([]byte(validConfig))
+	require.NoError(t, err)
+	var startup []string
+	logDryRun(logr.New(logCapture{entries: &startup}), initial)
+	require.Len(t, startup, 1)
+	require.Contains(t, startup[0], "Dry run is ON by default")
+
+	store := config.NewStore(initial)
+	reload := make(chan event.GenericEvent, 4)
+	var entries []string
+	callback := reloadHandler(initial.HubConfig, store, metrics.New(prometheus.NewRegistry()), reload, logr.New(logCapture{entries: &entries}), "config.yaml")
+
+	require.NoError(t, store.Update([]byte(validConfig+"interval: 3m\n")))
+	callback(nil)
+	require.NotContains(t, strings.Join(entries, " "), "Dry run", "an unrelated reload says nothing about dry run")
+
+	require.NoError(t, store.Update([]byte(validConfig+"defaults: {dryRunGrow: false}\n")))
+	callback(nil)
+	callback(nil)
+	joined := strings.Join(entries, "\n")
+	require.Equal(t, 1, strings.Count(joined, "Dry run changed"), "logged once, not on every callback")
+	require.Contains(t, joined, "default dry run turned OFF")
+	require.Contains(t, joined, "Dry run is OFF by default: pools place REAL install orders")
+
+	require.NoError(t, store.Update([]byte(strings.Replace(validConfig, "pools: {p: {}}", "pools: {p: {dryRunGrow: true}}", 1)+"defaults: {dryRunGrow: false}\n")))
+	callback(nil)
+	require.Contains(t, strings.Join(entries, "\n"), "pool p: dry run turned ON")
+}
