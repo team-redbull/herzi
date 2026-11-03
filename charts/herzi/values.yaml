@@ -40,6 +40,11 @@ config:
     dryRunGrow: true # Log intended orders instead of calling install-server; set false per pool to go live.
     paused: false # Suspend growth for this pool.
   pools: {} # Optional per-InfraEnv overrides; every other InfraEnv uses the defaults. exclude: true ignores one.
+installer:
+  tls:
+    caCert: "" # PEM text of the CA that signed the install endpoint (config.installURL), trusted in addition to the system roots; the chart creates the Secret. Pod restarts when it changes.
+    existingSecret: "" # Alternative to caCert: a Secret you created yourself (not both).
+    caKey: ca.crt # Key inside the Secret holding the CA.
 temporal:
   tls:
     caCert: "" # PEM text of the CA that signed Temporal; the chart creates the Secret. Pod restarts when it changes.

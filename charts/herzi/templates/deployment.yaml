@@ -18,7 +18,7 @@ spec:
       labels:
         {{- toYaml (merge (include "herzi.labels" . | fromYaml) .Values.podLabels) | nindent 8 }}
       annotations:
-        {{- toYaml (merge (dict "checksum/startup-config" (include "herzi.startupChecksum" .) "checksum/temporal-ca" (.Values.temporal.tls.caCert | default "" | sha256sum)) .Values.podAnnotations) | nindent 8 }}
+        {{- toYaml (merge (dict "checksum/startup-config" (include "herzi.startupChecksum" .) "checksum/temporal-ca" (.Values.temporal.tls.caCert | default "" | sha256sum) "checksum/install-ca" (.Values.installer.tls.caCert | default "" | sha256sum)) .Values.podAnnotations) | nindent 8 }}
     spec:
       serviceAccountName: {{ include "herzi.serviceAccount" . }}
       terminationGracePeriodSeconds: 30
@@ -71,6 +71,9 @@ spec:
             {{- if include "herzi.temporalCASecret" . }}
             - {name: HERZI_TEMPORAL_TLS_CA_FILE, value: {{ printf "/etc/herzi-temporal/%s" .Values.temporal.tls.caKey | quote }}}
             {{- end }}
+            {{- if include "herzi.installCASecret" . }}
+            - {name: HERZI_INSTALL_CA_FILE, value: {{ printf "/etc/herzi-install/%s" .Values.installer.tls.caKey | quote }}}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -78,6 +81,9 @@ spec:
             - {name: config, mountPath: /etc/herzi, readOnly: true}
             {{- if include "herzi.temporalCASecret" . }}
             - {name: temporal-tls, mountPath: /etc/herzi-temporal, readOnly: true}
+            {{- end }}
+            {{- if include "herzi.installCASecret" . }}
+            - {name: install-tls, mountPath: /etc/herzi-install, readOnly: true}
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
@@ -90,6 +96,12 @@ spec:
         - name: temporal-tls
           secret:
             secretName: {{ include "herzi.temporalCASecret" . | quote }}
+            defaultMode: 0444
+        {{- end }}
+        {{- if include "herzi.installCASecret" . }}
+        - name: install-tls
+          secret:
+            secretName: {{ include "herzi.installCASecret" . | quote }}
             defaultMode: 0444
         {{- end }}
         {{- with .Values.extraVolumes }}

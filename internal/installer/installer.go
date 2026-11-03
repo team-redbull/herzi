@@ -30,6 +30,9 @@ type Options struct {
 	HTTPClient                 *http.Client
 	Timeout                    time.Duration
 	BearerToken                string
+	// CAFile is a PEM bundle trusted in addition to the system roots, for an install endpoint signed by a private CA.
+	// It applies to the default transport only; a supplied HTTPClient keeps its own TLS settings.
+	CAFile string
 }
 
 type Installer struct {
@@ -66,6 +69,13 @@ func New(o Options) (*Installer, error) {
 		// dropped fails it at once, so every request gets a fresh connection, as curl does.
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.DisableKeepAlives = true
+		if o.CAFile != "" {
+			roots, err := rootsWith(o.CAFile)
+			if err != nil {
+				return nil, err
+			}
+			transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+		}
 		client.Transport = transport
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -74,6 +84,22 @@ func New(o Options) (*Installer, error) {
 		version = info.Main.Version
 	}
 	return &Installer{options: o, client: &client, userAgent: "herzi/" + version}, nil
+}
+
+// rootsWith returns the system roots plus every certificate in the PEM file.
+func rootsWith(path string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read install CA file: %w", err)
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
+	if !roots.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("install CA file %q holds no certificate", path)
+	}
+	return roots, nil
 }
 
 type requestBody struct {

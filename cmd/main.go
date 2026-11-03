@@ -73,6 +73,7 @@ const (
 	envTemporalKey    = "HERZI_TEMPORAL_TLS_KEY_FILE"
 	envTemporalAPIKey = "HERZI_TEMPORAL_API_KEY"
 	envBearerToken    = "HERZI_API_BEARER_TOKEN"
+	envInstallCA      = "HERZI_INSTALL_CA_FILE"
 )
 
 func startupBoundChanged(old, current config.HubConfig) []string {
@@ -164,6 +165,7 @@ func run(args []string) int {
 	inst, err := installer.New(installer.Options{
 		URL: hub.InstallURL, MCECluster: hub.MCEName, Namespace: hub.AgentNamespace,
 		Timeout: installTimeout(hub.ReconcileTimeout), BearerToken: os.Getenv(envBearerToken),
+		CAFile: os.Getenv(envInstallCA),
 	})
 	if err != nil {
 		setupLog.Error(err, "Failed to create the installer client")

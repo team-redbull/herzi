@@ -95,7 +95,7 @@ replicas of all its NodePools (listed in `nodePools`), `assigned`/`claimable`/`s
 | `... refused the connection` / `... was reset` | `connection_refused` / `connection_reset` | Nothing listens, or a firewall/NetworkPolicy/router drops the connection. |
 | `... closed the connection without replying` | `server_closed_connection` | The router or a firewall closed the connection before an answer. herzi opens a fresh connection for every POST, so this is not a stale pooled connection. |
 | `... is unreachable from this pod` | `network_unreachable` | No route from the pod network to the endpoint. |
-| `... TLS certificate is not trusted by this pod` | `tls_certificate_not_trusted` | The endpoint uses a private CA that the pod does not trust. `curl -k` on a node hides this. herzi has no CA setting for `installURL` yet. |
+| `... TLS certificate is not trusted by this pod` | `tls_certificate_not_trusted` | The install endpoint uses a private CA that the pod does not trust (`curl -k` on a node hides this). Put its CA, PEM, in `installer.tls.caCert`; it is trusted in addition to the system roots. The certificate must also match the host name in `installURL`. |
 | `... does not match its host name` / `expired or not valid` | `tls_hostname_mismatch` / `tls_certificate_invalid` | Use the host name in the certificate, or renew the certificate. |
 | `... is https but the server does not speak TLS` | `server_is_not_tls` | Use `http://` or fix the route. |
 | `Install request got an unexpected HTTP status` | `unexpected_http_status` | Anything other than 200/202/4xx, for example 3xx (redirects are not followed) or 5xx; the log shows `httpStatus` and `responseBody`. |

@@ -77,7 +77,7 @@ Unit tests with the fake client passing does not mean envtest passes: run the en
 - `internal/config`: strict loader (durations are strings), per-pool merge and validation, last-good store, file watcher.
 - `internal/ids`: workflow ids, pinned to the workflows repo (`shared/workflow_ids.py`): `install-server-<mce>_<infraEnv>_<slot>`.
 - `internal/metrics`, `internal/kube`, `cmd/main.go`: Prometheus metrics, unstructured views, manager wiring.
-- `charts/herzi`: the Helm chart (exactly 20 packaged files; a test asserts the list). Fixtures are in `hack/chart/`.
+- `charts/herzi`: the Helm chart (exactly 21 packaged files; a test asserts the list). Fixtures are in `hack/chart/`.
 - `docs/design` (behaviour), `docs/ops` (install, operate, RBAC, runbook), `docs/review` (historical records, do not rewrite).
 
 ## Behaviour that must not change without a design decision

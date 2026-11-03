@@ -412,6 +412,47 @@
     },
     "extraVolumeMounts": {
       "type": "array"
+    },
+    "installer": {
+      "type": "object",
+      "properties": {
+        "tls": {
+          "type": "object",
+          "properties": {
+            "caCert": {
+              "type": "string",
+              "pattern": "^$|^\\s*-----BEGIN CERTIFICATE-----"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "caKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "if": {
+            "required": [
+              "caCert"
+            ],
+            "properties": {
+              "caCert": {
+                "minLength": 1
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "existingSecret": {
+                "maxLength": 0,
+                "description": "set caCert or existingSecret, not both"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "$schema": "http://json-schema.org/draft-07/schema#",

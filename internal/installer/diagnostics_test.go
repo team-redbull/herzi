@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -104,5 +107,43 @@ func TestHTTPFailureKindsCarryStatusAndBody(t *testing.T) {
 				t.Fatalf("got %#v (%v)", failure, err)
 			}
 		})
+	}
+}
+
+func TestInstallCAFileTrustsAPrivateEndpoint(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"results":[{"slot":1,"status":"started"}]}`)
+	}))
+	defer server.Close()
+	ca := filepath.Join(t.TempDir(), "ca.crt")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(ca, pemBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := newTestInstaller(t, server.URL, nil).Install(context.Background(), pipeline.InstallRequest{Count: 1})
+	var failure *pipeline.InstallError
+	if !errors.As(err, &failure) || failure.Kind != pipeline.KindTLSUntrusted {
+		t.Fatalf("without the CA the certificate must be reported as not trusted, got %v", err)
+	}
+
+	result, err := newTestInstaller(t, server.URL, func(o *Options) { o.CAFile = ca }).Install(context.Background(), pipeline.InstallRequest{Count: 1})
+	if err != nil || len(result.Started) != 1 {
+		t.Fatalf("with the CA the request must succeed, got %+v %v", result, err)
+	}
+}
+
+func TestInstallCAFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.crt")
+	if err := os.WriteFile(empty, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{"missing": filepath.Join(dir, "absent.crt"), "no certificate": empty} {
+		_, err := New(Options{URL: "https://example.test/install", MCECluster: "ocp4-a", Namespace: "inventory", CAFile: path})
+		if err == nil {
+			t.Fatalf("%s: want an error", name)
+		}
 	}
 }

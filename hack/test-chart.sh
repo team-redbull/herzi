@@ -164,6 +164,23 @@ assert 'root.pem' in next(d for d in docs if d['kind']=='Secret')['data']
 assert not [d for d in render() if d['kind']=='Secret'],'no Secret unless a CA is supplied'
 invalid({'temporal':{'tls':{'caCert':CERT,'existingSecret':'custom-ca'}}},['existingSecret'])
 invalid({'temporal':{'tls':{'caCert':'not a certificate'}}},['caCert'])
+docs=render(extra={'installer':{'tls':{'caCert':CERT}}})
+secret=next(d for d in docs if d['kind']=='Secret')
+assert secret['metadata']['name']=='herzi-install-ca' and base64.b64decode(secret['data']['ca.crt']).decode()==CERT
+assert next(v for v in pod(docs)['spec']['volumes'] if v['name']=='install-tls')['secret']['secretName']=='herzi-install-ca'
+assert next(e for e in pod(docs)['spec']['containers'][0]['env'] if e['name']=='HERZI_INSTALL_CA_FILE')['value']=='/etc/herzi-install/ca.crt'
+assert next(m for m in pod(docs)['spec']['containers'][0]['volumeMounts'] if m['name']=='install-tls')['mountPath']=='/etc/herzi-install'
+install_sum=pod(docs)['metadata']['annotations']['checksum/install-ca']
+docs=render(extra={'installer':{'tls':{'caCert':CERT+'#changed\n'}}})
+assert pod(docs)['metadata']['annotations']['checksum/install-ca']!=install_sum,'a new install CA must restart the pod'
+docs=render(extra={'installer':{'tls':{'existingSecret':'mine','caKey':'root.pem'}}})
+assert next(v for v in pod(docs)['spec']['volumes'] if v['name']=='install-tls')['secret']['secretName']=='mine'
+assert not [d for d in docs if d['kind']=='Secret'],'an existing Secret is mounted, not created'
+both=render(extra={'installer':{'tls':{'caCert':CERT}},'temporal':{'tls':{'caCert':CERT}}})
+assert sorted(d['metadata']['name'] for d in both if d['kind']=='Secret')==['herzi-install-ca','herzi-temporal-ca']
+assert 'HERZI_INSTALL_CA_FILE' not in {e['name'] for e in pod(render())['spec']['containers'][0]['env']}
+invalid({'installer':{'tls':{'caCert':CERT,'existingSecret':'custom-ca'}}},['existingSecret'])
+invalid({'installer':{'tls':{'caCert':'not a certificate'}}},['caCert'])
 for kind,key in [('ServiceMonitor','serviceMonitor'),('PrometheusRule','prometheusRule')]:
     docs=render(extra={key:{'enabled':True}})
     assert any(d['kind']==kind for d in docs)
@@ -198,7 +215,7 @@ with tempfile.TemporaryDirectory() as directory:
     archive=next(Path(directory).glob('*.tgz'))
     result=subprocess.run(['tar','-tzf',str(archive)],text=True,capture_output=True,check=True)
     expected=['Chart.yaml','values.yaml','values.schema.json','.helmignore']
-    expected += ['templates/'+name for name in ['NOTES.txt','_helpers.tpl','serviceaccount.yaml','clusterrole.yaml','clusterrolebinding.yaml','role.yaml','rolebinding.yaml','metrics-auth.yaml','temporal-ca-secret.yaml','configmap.yaml','deployment.yaml','service.yaml','servicemonitor.yaml','prometheusrule.yaml']]
+    expected += ['templates/'+name for name in ['NOTES.txt','_helpers.tpl','serviceaccount.yaml','clusterrole.yaml','clusterrolebinding.yaml','role.yaml','rolebinding.yaml','metrics-auth.yaml','temporal-ca-secret.yaml','install-ca-secret.yaml','configmap.yaml','deployment.yaml','service.yaml','servicemonitor.yaml','prometheusrule.yaml']]
     expected += ['files/rbac-rules.yaml','files/alerts.rules.yaml']
     assert sorted(result.stdout.splitlines())==sorted('herzi/'+name for name in expected),result.stdout
     print('Package allowlist passed: '+str(len(expected))+' files')

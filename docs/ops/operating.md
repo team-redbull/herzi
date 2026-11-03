@@ -364,11 +364,28 @@ and ignores only pool, keeping each controller's threshold separate. The rule us
 
 ## Secrets, TLS and secure monitoring
 
-The only Secret the chart creates is the Temporal CA (below); it holds a public certificate, not a credential.
+The only Secrets the chart creates are the Temporal CA and the install-endpoint CA (below); they hold public certificates, not credentials.
 For anything secret (API keys, client keys, tokens) create the Secret in the release namespace
 with your secret manager and reference it; never put credentials in values or the ConfigMap. With no
 Secret references, Temporal uses plaintext gRPC and metrics use a self-signed
 certificate. Examples below are separate additions to your hub values.
+
+The install endpoint (`config.installURL`) is checked against the system roots plus an optional CA of your own. If it is
+served with a private CA, the log shows `Install request failed: the install endpoint's TLS certificate is not trusted by
+this pod` and `herzi_install_errors_total{kind="tls_certificate_not_trusted"}` grows. Paste the CA that signed it (a full
+chain is fine) and the chart creates `<release>-install-ca`, mounts it and sets `HERZI_INSTALL_CA_FILE`; the pod restarts when it changes:
+
+```yaml
+installer:
+  tls:
+    caCert: |
+      -----BEGIN CERTIFICATE-----
+      MIID...
+      -----END CERTIFICATE-----
+```
+
+Or `--set-file installer.tls.caCert=./install-ca.pem`; `installer.tls.existingSecret` and `caKey` work as for Temporal
+(set one of `caCert` and `existingSecret`, never both). The CA is added to the system roots, never replaces them.
 
 Temporal TLS verifies the server against a CA you give in the values. Paste the PEM text and the chart
 creates the Secret (`<release>-temporal-ca`) and mounts it; the pod restarts when the certificate changes:
