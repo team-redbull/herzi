@@ -49,8 +49,11 @@ export KUBEBUILDER_ASSETS=$PWD/bin/k8s/1.37.0-linux-amd64
   and the loser's compiled output is never stored (an empty `plain` cache cost ~100 s per job once). Tool binaries and envtest assets are cached by pinned version.
 - The image is not compiled inside Docker in CI (111 s, no Go cache): `make build` runs on the runner with `GOOS=linux GOARCH=amd64`, and
   `docker build --target prebuilt` copies `bin/manager`. The default Dockerfile target (`runtime`) still compiles in a builder stage for local `make docker-build`.
+- Each scope's build cache is keyed by ISO week (`gobuild-<scope>-...-<YYYY-Www>`): it is saved once a week and otherwise only restored, because
+  saving ~300 MB at the end of every job sat on the critical path for 5-11 s.
 - `publish` (main only, needs all six): version from Conventional Commits (`PaulHatch/semantic-version`), tag, release notes from the subjects,
-  image `ghcr.io/team-redbull/herzi:{X.Y.Z,X.Y,X,sha-<commit>,latest}`. Nothing is tagged or pushed unless every job is green.
+  image `ghcr.io/team-redbull/herzi:{X.Y.Z,X.Y,X (not 0.x),sha-<7>,latest}` built with plain `docker build --target prebuilt` from the binary the
+  `image` job uploaded as an artifact (no second compile, no Buildx). Nothing is tagged or pushed unless every job is green.
 - Never cancel a `main` run (`cancel-in-progress` is false there). Every action is pinned to a full commit SHA (copy the pins from `server_scan`).
 - After a push to `main`, watch the run (`gh run watch`) and report it; the first run on an empty cache is slow.
 

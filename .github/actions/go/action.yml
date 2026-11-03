@@ -1,5 +1,5 @@
 name: Go toolchain with caches
-description: setup-go plus module and build caches; main saves a fresh build cache every run, other refs only restore.
+description: setup-go plus module and build caches; main refreshes each scope's build cache once a week, other refs only restore.
 inputs:
   scope:
     description: Build cache scope; jobs with different compile flags (race or not) must not share one.
@@ -12,6 +12,9 @@ runs:
       with:
         go-version-file: go.mod
         cache: false
+    - id: week
+      shell: bash
+      run: echo "value=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
     - id: paths
       shell: bash
       run: |
@@ -26,7 +29,7 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.paths.outputs.build }}
-        key: gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+        key: gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ steps.week.outputs.value }}
         restore-keys: |
           gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-
           gobuild-${{ inputs.scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
