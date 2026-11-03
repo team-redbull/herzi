@@ -132,6 +132,10 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 | `herzi_pool_failure_class` | gauge 0/1 | pool, class (`capacity`,`other`,`unknown`) | last failure class |
 | `herzi_orders_total` | counter | pool, mode (`full`,`probe`), result (`started`,`short`,`ambiguous`,`rejected`,`dry_run`) | install requests |
 | `herzi_machines_ordered_total` | counter | pool | machines requested |
+| `herzi_install_errors_total` | counter | pool, kind (`timeout`, `canceled`, `dns_failure`, `connection_refused`, `connection_reset`, `server_closed_connection`, `network_unreachable`, `tls_certificate_not_trusted`, `tls_hostname_mismatch`, `tls_certificate_invalid`, `server_is_not_tls`, `tls_error`, `transport_error`, `rejected_by_api`, `unexpected_http_status`, `invalid_response`, `response_unreadable`, `other`) | failed install requests by cause |
+| `herzi_install_http_responses_total` | counter | code (`202`, `422`, ... or `none` when no response arrived) | HTTP status returned by the install endpoint |
+| `herzi_install_request_duration_seconds` | histogram | — | time spent in the install POST |
+| `herzi_temporal_errors_total` | counter | op (`sweep`, `pollers`), kind (`deadline_exceeded`, `unavailable`, `unauthenticated`, `permission_denied`, `not_found`, `tls_certificate`, `tls`, `canceled`, `grpc_error`, `other`) | failed Temporal reads by cause |
 | `herzi_reconcile_duration_seconds` | histogram | — | per reconcile |
 | `herzi_sweep_duration_seconds` | histogram | — | per pool sweep |
 | `herzi_stuck_after_seconds` | gauge | none | startup-configured open-run alert threshold in seconds (process constant) |

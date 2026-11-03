@@ -98,6 +98,7 @@ type PoolFacts struct {
 	EarlyBound   bool
 
 	Demand      int
+	NodePools   []NodePoolDemand
 	Assigned    int
 	Claimable   int
 	Settling    int
@@ -108,6 +109,12 @@ type PoolFacts struct {
 
 	Problems []Problem
 	Warnings []Warning
+}
+
+// NodePoolDemand is one NodePool's replicas, counted in PoolFacts.Demand.
+type NodePoolDemand struct {
+	Name     string
+	Replicas int
 }
 
 type Verdict struct {

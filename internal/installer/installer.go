@@ -4,14 +4,19 @@ package installer
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/team-redbull/herzi/internal/pipeline"
@@ -56,6 +61,12 @@ func New(o Options) (*Installer, error) {
 	client := http.Client{}
 	if o.HTTPClient != nil {
 		client = *o.HTTPClient
+	} else {
+		// A POST is never retried and a reused keep-alive connection that the router or a firewall already
+		// dropped fails it at once, so every request gets a fresh connection, as curl does.
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.DisableKeepAlives = true
+		client.Transport = transport
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	version := "dev"
@@ -74,6 +85,13 @@ type requestBody struct {
 
 // Install never retries; ErrAmbiguous means machines may have started and requires a fresh sweep.
 func (i *Installer) Install(ctx context.Context, req pipeline.InstallRequest) (pipeline.InstallResult, error) {
+	started := time.Now()
+	result, err := i.install(ctx, req)
+	result.Duration = time.Since(started)
+	return result, err
+}
+
+func (i *Installer) install(ctx context.Context, req pipeline.InstallRequest) (pipeline.InstallResult, error) {
 	result := pipeline.InstallResult{Requested: req.Count}
 	if req.Count < 1 || req.Count > pipeline.APIMaxCount {
 		return result, fmt.Errorf("%w: count must be 1..%d", pipeline.ErrRejected, pipeline.APIMaxCount)
@@ -96,37 +114,108 @@ func (i *Installer) Install(ctx context.Context, req pipeline.InstallRequest) (p
 	}
 	response, err := i.client.Do(request)
 	if err != nil {
-		// Transport errors may contain credentials; expose only classification and context sentinels.
-		if ctx.Err() != nil {
-			return result, fmt.Errorf("%w: %w", pipeline.ErrAmbiguous, ctx.Err())
-		}
-		return result, fmt.Errorf("%w: HTTP transport failed", pipeline.ErrAmbiguous)
+		return result, i.transportError(ctx, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	result.HTTPCode = response.StatusCode
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, maxBody+1))
 	if response.StatusCode >= 400 && response.StatusCode < 500 {
-		detail := string(data)
-		if i.options.BearerToken != "" {
-			detail = strings.ReplaceAll(detail, i.options.BearerToken, "[redacted]")
-		}
-		if len(detail) > 512 {
-			detail = detail[:512]
-		}
-		return result, fmt.Errorf("%w: HTTP %d: %s", pipeline.ErrRejected, response.StatusCode, detail)
+		detail := i.snippet(data)
+		return result, i.failure(pipeline.KindRejected, pipeline.ErrRejected, response.StatusCode,
+			fmt.Sprintf("HTTP %d: %s", response.StatusCode, detail), detail, nil)
 	}
 	// Preserve complete slot reports even when the remaining reply is malformed or truncated.
 	parseErr := parseReport(data, &result)
 	if readErr != nil || len(data) > maxBody {
-		return result, fmt.Errorf("%w: response could not be read within 1 MiB", pipeline.ErrAmbiguous)
+		return result, i.failure(pipeline.KindResponseUnreadable, pipeline.ErrAmbiguous, response.StatusCode,
+			"response could not be read within 1 MiB", i.snippet(data), nil)
 	}
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {
-		return result, fmt.Errorf("%w: unexpected HTTP %d", pipeline.ErrAmbiguous, response.StatusCode)
+		return result, i.failure(pipeline.KindUnexpectedStatus, pipeline.ErrAmbiguous, response.StatusCode,
+			fmt.Sprintf("unexpected HTTP %d (expected 200 or 202)", response.StatusCode), i.snippet(data), nil)
 	}
 	if parseErr != nil {
-		return result, fmt.Errorf("%w: invalid per-slot response", pipeline.ErrAmbiguous)
+		return result, i.failure(pipeline.KindInvalidResponse, pipeline.ErrAmbiguous, response.StatusCode,
+			"invalid per-slot response: "+i.redact(parseErr.Error()), i.snippet(data), nil)
 	}
 	return result, nil
+}
+
+// failure builds an InstallError whose text never contains the bearer token or the URL query.
+func (i *Installer) failure(kind string, class error, code int, detail, body string, cause error) *pipeline.InstallError {
+	return &pipeline.InstallError{Kind: kind, Class: class, HTTP: code, Detail: i.redact(detail), Body: body,
+		URL: i.safeURL(), Cause: cause}
+}
+
+func (i *Installer) redact(text string) string {
+	if i.options.BearerToken != "" {
+		text = strings.ReplaceAll(text, i.options.BearerToken, "[redacted]")
+	}
+	return text
+}
+
+func (i *Installer) snippet(data []byte) string {
+	text := i.redact(string(data))
+	if len(text) > 512 {
+		text = text[:512]
+	}
+	return text
+}
+
+// safeURL drops credentials, query and fragment so the URL can be logged.
+func (i *Installer) safeURL() string {
+	u, err := url.Parse(i.options.URL)
+	if err != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + u.Path
+}
+
+// transportError names the real cause of a failed HTTP call; every one of these is ambiguous because the
+// request may have reached the server before the connection broke.
+func (i *Installer) transportError(ctx context.Context, err error) error {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
+		err = urlErr.Err
+	}
+	var (
+		unknownAuthority x509.UnknownAuthorityError
+		hostname         x509.HostnameError
+		invalidCert      x509.CertificateInvalidError
+		recordHeader     tls.RecordHeaderError
+		dns              *net.DNSError
+		netErr           net.Error
+	)
+	kind, cause := pipeline.KindTransport, error(nil)
+	switch {
+	case ctx.Err() != nil:
+		kind, cause = pipeline.KindTimeout, ctx.Err()
+		if errors.Is(ctx.Err(), context.Canceled) {
+			kind = pipeline.KindCanceled
+		}
+	case errors.As(err, &unknownAuthority):
+		kind = pipeline.KindTLSUntrusted
+	case errors.As(err, &hostname):
+		kind = pipeline.KindTLSHostname
+	case errors.As(err, &invalidCert):
+		kind = pipeline.KindTLSInvalid
+	case errors.As(err, &recordHeader):
+		kind = pipeline.KindTLSNotTLS
+	case strings.Contains(err.Error(), "tls:"):
+		kind = pipeline.KindTLSOther
+	case errors.As(err, &dns):
+		kind = pipeline.KindDNS
+	case errors.Is(err, syscall.ECONNREFUSED):
+		kind = pipeline.KindConnectionRefused
+	case errors.Is(err, syscall.ECONNRESET):
+		kind = pipeline.KindConnectionReset
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), strings.Contains(err.Error(), "server closed idle connection"):
+		kind = pipeline.KindConnectionClosed
+	case errors.Is(err, syscall.ENETUNREACH), errors.Is(err, syscall.EHOSTUNREACH):
+		kind = pipeline.KindUnreachable
+	case errors.Is(err, os.ErrDeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		kind = pipeline.KindTimeout
+	}
+	return i.failure(kind, pipeline.ErrAmbiguous, 0, i.redact(err.Error()), "", cause)
 }
 
 func parseReport(data []byte, result *pipeline.InstallResult) error {

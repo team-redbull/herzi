@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +48,8 @@ type Reconciler struct {
 	mu       sync.Mutex
 	reasons  map[string]string
 	attempts map[string]time.Time
+	logged   map[string]time.Time
+	status   map[string]statusEntry
 	pollers  *pollerEntry
 }
 
@@ -97,7 +98,9 @@ func New(o Options) (*Reconciler, error) {
 			cfg:      o.Config,
 			startup:  o.Config.Snapshot().HubConfig,
 			reasons:  make(map[string]string),
-			attempts: make(map[string]time.Time)},
+			attempts: make(map[string]time.Time),
+			logged:   make(map[string]time.Time),
+			status:   make(map[string]statusEntry)},
 		nil
 }
 
@@ -157,6 +160,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	sweepStarted := time.Now()
 	sweep := r.sweep(ctx, key, pipeline.ParseState(ie.GetAnnotations()[kube.AnnotationState]), pc)
 	raw.Sweep = map[pipeline.PoolKey]pipeline.SweepResult{key: sweep}
+	if sweep.Err != nil {
+		r.Metrics.TemporalError("sweep", classifyTemporal(sweep.Err))
+	}
 	r.Metrics.SweepDuration(time.Since(sweepStarted))
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -178,6 +184,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	verdict := validate(facts, raw, cfg)
 	intent := pipeline.Decide(facts, pc, now)
 	r.observe(facts, verdict, intent, pc, now)
+	r.logStatus(ctx, facts, verdict, intent, pc, now)
 	exists := true
 	defer func() {
 		if !exists || !facts.Managed {
@@ -188,10 +195,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	}()
 	if verdict.Blocked {
 		wakeUntil = facts.BlockedUntil
-		r.blocked(ctx, req.Name, verdict.Reasons)
+		r.blockedAt(ctx, req.Name, verdict.Reasons, now)
 		return result, nil
 	}
-	r.blocked(ctx, req.Name, nil)
+	r.blockedAt(ctx, req.Name, nil, now)
 	switch i := intent.(type) {
 	case pipeline.Hold:
 		log.FromContext(ctx).V(1).Info("Holding pool", "pool", req.Name, "reason", i.Reason)
@@ -221,21 +228,9 @@ func (r *Reconciler) forget(pool string) {
 	r.mu.Lock()
 	delete(r.reasons, pool)
 	delete(r.attempts, pool)
+	delete(r.status, pool)
+	r.clearLogged(pool)
 	r.mu.Unlock()
-}
-func (r *Reconciler) blocked(ctx context.Context, pool string, reasons []string) {
-	reason := strings.Join(metrics.BlockReasons(reasons), "; ")
-	r.mu.Lock()
-	old := r.reasons[pool]
-	if reason == "" {
-		delete(r.reasons, pool)
-	} else {
-		r.reasons[pool] = reason
-	}
-	r.mu.Unlock()
-	if reason != "" && reason != old {
-		log.FromContext(ctx).Info("Pool blocked", "pool", pool, "reasons", reason)
-	}
 }
 func (r *Reconciler) warnings(ctx context.Context, warnings []pipeline.Warning) {
 	seen := make(map[pipeline.Warning]bool)
@@ -277,6 +272,9 @@ func (r *Reconciler) cachedPollers(ctx context.Context, now time.Time) pipeline.
 	r.pollers = e
 	r.mu.Unlock()
 	status := r.Queues.Pollers(ctx)
+	if status.Err != nil {
+		r.Metrics.TemporalError("pollers", classifyTemporal(status.Err))
+	}
 	r.mu.Lock()
 	e.status = status
 	close(e.done)
@@ -293,12 +291,12 @@ func (r *Reconciler) recordOutcome(ctx context.Context,
 	cfg config.Config,
 	now time.Time) error {
 	result := "started"
+	r.recordInstall(ctx, key.Name, request, res, err, blockedUntil(now, cfg.AmbiguousWait))
 	switch {
 	case errors.Is(err, pipeline.ErrAmbiguous):
 		result = "ambiguous"
 	case errors.Is(err, pipeline.ErrRejected):
 		result = "rejected"
-		log.FromContext(ctx).Error(pipeline.ErrRejected, "Install request rejected", "pool", key.Name, "request", request)
 	case err != nil:
 		return fmt.Errorf("install pool %s: %w", key.Name, err)
 	case len(res.Started) < res.Requested:
@@ -326,6 +324,7 @@ func (r *Reconciler) snapshot() config.Config {
 	cfg.HubConfig = r.startup
 	cfg.Interval, cfg.ReconcileTimeout = live.Interval, live.ReconcileTimeout
 	cfg.AmbiguousWait, cfg.StuckAfter = live.AmbiguousWait, live.StuckAfter
+	cfg.IgnoreLabel = live.IgnoreLabel
 	return cfg
 }
 
@@ -338,10 +337,15 @@ func blockedUntil(now time.Time, wait time.Duration) time.Time {
 	return until
 }
 
-// External errors may contain credentials; expose safe text while preserving errors.Is/As.
+// The cause is shown (first line, bounded); install errors are already scrubbed of tokens and query strings.
 type reconcileError struct{ cause error }
 
-func (e *reconcileError) Error() string { return "reconcile failed" }
+func (e *reconcileError) Error() string {
+	if e.cause == nil {
+		return "reconcile failed"
+	}
+	return "reconcile failed: " + summarize(e.cause.Error())
+}
 func (e *reconcileError) Unwrap() error { return e.cause }
 
 const sweepWindow = 10 * time.Second

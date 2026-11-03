@@ -233,13 +233,20 @@ A frozen snapshot serves each pass. There are exactly nine pool settings: `highP
 herzi polls the mounted file every ten seconds and requeues all pools when an accepted change
 appears; the directory mount avoids subPath so Kubernetes can refresh its contents (the kubelet
 needs up to about a minute). Check both the accepted-config metric and the logs after updating.
-Pool/default edits and live timing (`interval`, `reconcileTimeout`, `ambiguousWait`)
+Pool/default edits (including `dryRunGrow`), `ignoreLabel` and live timing (`interval`, `reconcileTimeout`, `ambiguousWait`)
 reload without a rollout. Among controller settings, only startup-bound values
 (`mceName`, `agentNamespace`, `installURL`, `maxSlots`, `stuckAfter`,
 `temporalAddress`, `temporalNamespace`, `activityQueue`, `workflowQueue`, `segmentQueue`)
 change `checksum/startup-config` and restart pods. Thus `helm upgrade` is safe for
 pool edits. Changes to image, Secret references or pod scheduling also change the
 pod template and cause a rollout.
+
+Flipping `dryRunGrow` from `true` to `false` therefore needs no restart: once the kubelet has refreshed the
+mounted file (up to about a minute) herzi accepts it within ten seconds, logs `Configuration reloaded`, and
+reconciles every pool immediately, so a pool below its target places its first real order right then. An invalid
+edit is rejected, the last good configuration stays, `herzi_config_valid` drops to 0 and the log says
+`Configuration update rejected`. Make the change in the Helm values: editing the ConfigMap by hand works until
+the next `helm upgrade`, which writes the values back.
 
 ```bash
 helm upgrade herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set image.tag=0.1.0

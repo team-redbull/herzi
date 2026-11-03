@@ -74,6 +74,41 @@ herzi_pool_failure_class{pool="32-128-zone-1",class="other"}
 
 Inspect the latest failed slot close event in Temporal and the install worker logs. Repair boot, discovery, network or ignition failures for the reported error type. Capacity remediation alone will not fix AgentNeverAppearedError or a broken install path.
 
+## Reading the herzi log
+
+Logs are JSON. Failures are `level: error` with their own message and the real cause; intended states are `info`.
+An error is logged when it first appears or changes and then again every five minutes while it lasts; a hub-wide
+problem (Temporal, queues) is logged once, not per pool. Credentials, URL user info and query strings are masked.
+
+`Pool status` (info) is logged when a pool's numbers change and every ten minutes: `demand` is the sum of the
+replicas of all its NodePools (listed in `nodePools`), `assigned`/`claimable`/`settling`/`stuckAgents` are its Agents,
+`openRuns` are install runs in flight (`oldestOpenRun` is the age of the oldest), `target` is `demand + buffer`,
+`shortfall` is `target - (assigned + claimable + settling + openRuns)`, `toOrder` is what herzi will request now
+(capped by `maxOpenRunsPerPool` and 20 per request), and `decision` says order, hold or blocked.
+
+| Message (error unless noted) | Metric `kind` / `reason` | Meaning and first check |
+|---|---|---|
+| `Install request timed out` | `timeout` | The POST took longer than half of `reconcileTimeout` (30 s by default). Machines may have started; the pool waits `ambiguousWait`. Check the API and the route. |
+| `... the install URL host name cannot be resolved` | `dns_failure` | The pod cannot resolve the host in `installURL`. Check cluster DNS or use an address that resolves in the cluster. |
+| `... refused the connection` / `... was reset` | `connection_refused` / `connection_reset` | Nothing listens, or a firewall/NetworkPolicy/router drops the connection. |
+| `... closed the connection without replying` | `server_closed_connection` | The router or a firewall closed the connection before an answer. herzi opens a fresh connection for every POST, so this is not a stale pooled connection. |
+| `... is unreachable from this pod` | `network_unreachable` | No route from the pod network to the endpoint. |
+| `... TLS certificate is not trusted by this pod` | `tls_certificate_not_trusted` | The endpoint uses a private CA that the pod does not trust. `curl -k` on a node hides this. herzi has no CA setting for `installURL` yet. |
+| `... does not match its host name` / `expired or not valid` | `tls_hostname_mismatch` / `tls_certificate_invalid` | Use the host name in the certificate, or renew the certificate. |
+| `... is https but the server does not speak TLS` | `server_is_not_tls` | Use `http://` or fix the route. |
+| `Install request got an unexpected HTTP status` | `unexpected_http_status` | Anything other than 200/202/4xx, for example 3xx (redirects are not followed) or 5xx; the log shows `httpStatus` and `responseBody`. |
+| `Install request got a reply that is not a valid result list` | `invalid_response` | The body is not the expected `results` JSON, often an HTML login or error page. |
+| `Install request rejected by the API` | `rejected_by_api` | A 4xx: nothing started. Read `httpStatus` and `responseBody` (for example a 422 validation message). |
+| `Install request accepted` (info) | — | `started`, `alreadyRunning` and `failedSlots` come from the API's per-slot report. |
+| `Cannot read the install workflows from Temporal` | `sweep_error` | Temporal is unreachable, the namespace is wrong, or access is denied. The cause is in the error. |
+| `Cannot check the Temporal task queues` | `poller_error` | Same, for the queue check. |
+| `No worker is polling the Temporal ... queue` | `activity_pollers`, `workflow_pollers`, `segment_pollers` | Temporal answers but no worker listens on the named `queue`. |
+| `Cannot read or parse a Kubernetes object` | `read_error` | An Agent, InfraEnv or NodePool could not be read or parsed. |
+| `Pool is paused` / `InfraEnv is being deleted` / `... waiting after an uncertain install request` (info) | `paused`, `deleting`, `blocked_until` | Intended states. |
+
+Count failures with `rate(herzi_install_errors_total[15m])` by `kind`, HTTP codes with
+`herzi_install_http_responses_total`, and Temporal failures with `herzi_temporal_errors_total` by `op` and `kind`.
+
 <a id="pool-blocked"></a>
 
 ## HerziPoolBlocked

@@ -23,6 +23,10 @@ type Metrics struct {
 	orders           *prometheus.CounterVec
 	machines         *prometheus.CounterVec
 	warnings         *prometheus.CounterVec
+	installErrors    *prometheus.CounterVec
+	installHTTP      *prometheus.CounterVec
+	temporalErrors   *prometheus.CounterVec
+	installDuration  prometheus.Histogram
 	pollers          *prometheus.GaugeVec
 	reconcile, sweep prometheus.Histogram
 	valid            prometheus.Gauge
@@ -32,6 +36,7 @@ type Metrics struct {
 // New reuses duplicate collectors; callers must check RegistrationError before use.
 const labelPool = "pool"
 const classOther = "other"
+const labelKind = "kind"
 
 func New(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{gauges: make(map[string]*prometheus.GaugeVec)}
@@ -84,7 +89,21 @@ func New(reg prometheus.Registerer) *Metrics {
 		[]string{labelPool})).(*prometheus.CounterVec)
 	m.warnings = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_warnings_total",
 		Help: "Hub findings"},
-		[]string{"kind"})).(*prometheus.CounterVec)
+		[]string{labelKind})).(*prometheus.CounterVec)
+	m.installErrors = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_install_errors_total",
+		Help: "Failed install requests by kind (timeout, tls_certificate_not_trusted, unexpected_http_status, ...)"},
+		[]string{labelPool,
+			labelKind})).(*prometheus.CounterVec)
+	m.installHTTP = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_install_http_responses_total",
+		Help: "HTTP status codes returned by the install endpoint; none means no response was received"},
+		[]string{"code"})).(*prometheus.CounterVec)
+	m.temporalErrors = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_temporal_errors_total",
+		Help: "Failed Temporal reads by operation (sweep, pollers) and kind (deadline_exceeded, unavailable, ...)"},
+		[]string{"op",
+			labelKind})).(*prometheus.CounterVec)
+	m.installDuration = register(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "herzi_install_request_duration_seconds",
+		Help:    "Time spent in the install POST",
+		Buckets: []float64{.05, .1, .25, .5, 1, 2.5, 5, 10, 20, 30}})).(prometheus.Histogram)
 	m.pollers = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_pollers",
 		Help: "Queue pollers"},
 		[]string{"queue"})).(*prometheus.GaugeVec)
@@ -187,7 +206,36 @@ func (m *Metrics) Order(pool string, mode pipeline.Mode, result string, started 
 	m.orders.WithLabelValues(pool, label, result).Inc()
 	m.machines.WithLabelValues(pool).Add(float64(started))
 }
-func (m *Metrics) Warning(kind string)               { m.warnings.WithLabelValues(kind).Inc() }
+func (m *Metrics) Warning(kind string) { m.warnings.WithLabelValues(kind).Inc() }
+
+var installKinds = []string{
+	pipeline.KindTimeout, pipeline.KindCanceled, pipeline.KindDNS, pipeline.KindConnectionRefused,
+	pipeline.KindConnectionReset, pipeline.KindConnectionClosed, pipeline.KindUnreachable, pipeline.KindTLSUntrusted,
+	pipeline.KindTLSHostname, pipeline.KindTLSInvalid, pipeline.KindTLSNotTLS, pipeline.KindTLSOther,
+	pipeline.KindTransport, pipeline.KindRejected, pipeline.KindUnexpectedStatus, pipeline.KindInvalidResponse,
+	pipeline.KindResponseUnreadable, pipeline.KindBadRequest,
+}
+
+// InstallResponse counts one install attempt: its HTTP status (0 when no response arrived), kind when it failed,
+// and how long the POST took. kind is bounded to the known set so labels cannot grow.
+func (m *Metrics) InstallResponse(pool string, httpCode int, kind string, took time.Duration) {
+	code := "none"
+	if httpCode >= 100 && httpCode <= 599 {
+		code = fmt.Sprint(httpCode)
+	}
+	m.installHTTP.WithLabelValues(code).Inc()
+	m.installDuration.Observe(took.Seconds())
+	if kind == "" {
+		return
+	}
+	if !slices.Contains(installKinds, kind) {
+		kind = classOther
+	}
+	m.installErrors.WithLabelValues(pool, kind).Inc()
+}
+
+// TemporalError counts a failed Temporal read; op is sweep or pollers.
+func (m *Metrics) TemporalError(op, kind string)     { m.temporalErrors.WithLabelValues(op, kind).Inc() }
 func (m *Metrics) SetConfigValid(valid bool)         { m.valid.Set(flag(valid)) }
 func (m *Metrics) ReconcileDuration(d time.Duration) { m.reconcile.Observe(d.Seconds()) }
 func (m *Metrics) SweepDuration(d time.Duration)     { m.sweep.Observe(d.Seconds()) }
@@ -205,6 +253,7 @@ func (m *Metrics) ForgetPool(pool string) {
 	m.blocked.DeletePartialMatch(labels)
 	m.failure.DeletePartialMatch(labels)
 	m.orders.DeletePartialMatch(labels)
+	m.installErrors.DeletePartialMatch(labels)
 	m.machines.DeleteLabelValues(pool)
 }
 

@@ -113,3 +113,8 @@ Plan and review with Codex, implement with Codex on disjoint files, then verify 
 - Tool state (`.claude-flow/`, `agentdb.rvf*`, `ruvector.db`) can appear anywhere, including inside the chart; it is git-ignored and
   `.helmignore` keeps it out of a packaged chart. Never commit it.
 - Never run `sort -u` on `.gitignore` or other structured files.
+- Logs must show the real cause but never credentials: pass external error text through `sanitize`/`summarize` (`internal/controller/logging.go`);
+  a failed install is a `pipeline.InstallError` whose `Kind` is also the `kind` label of `herzi_install_errors_total` (keep the label set bounded).
+- The install client must not reuse connections (`DisableKeepAlives`): the POST is never retried, so a stale pooled connection would fail it.
+- A hub setting is live only if `snapshot()` in the reconciler copies it from the live config; everything else is frozen at startup, so add new live
+  settings there and to the docs' list, or the chart's startup checksum must include them.

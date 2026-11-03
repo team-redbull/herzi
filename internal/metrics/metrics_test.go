@@ -18,6 +18,9 @@ func TestCatalogueAndForget(t *testing.T) {
 	m.Order("p", pipeline.Full, "started", 2)
 	m.Order("p", pipeline.Probe, "short", 1)
 	m.Warning("stray")
+	m.InstallResponse("p", 0, pipeline.KindTimeout, time.Second)
+	m.InstallResponse("p", 202, "", time.Second)
+	m.TemporalError("sweep", "deadline_exceeded")
 	m.SetConfigValid(true)
 	m.ObservePollers(pipeline.PollerStatus{Activity: 1, Workflow: 2, Segment: 3})
 	m.ReconcileDuration(time.Second)
@@ -28,7 +31,7 @@ func TestCatalogueAndForget(t *testing.T) {
 		labels []string
 	}{
 		"herzi_stuck_after_seconds": {"GAUGE", nil},
-		"herzi_pool_blocked":        {"GAUGE", []string{"pool", "reason"}}, "herzi_pool_failure_class": {"GAUGE", []string{"class", "pool"}}, "herzi_orders_total": {"COUNTER", []string{"mode", "pool", "result"}}, "herzi_machines_ordered_total": {"COUNTER", []string{"pool"}}, "herzi_warnings_total": {"COUNTER", []string{"kind"}}, "herzi_pollers": {"GAUGE", []string{"queue"}}, "herzi_config_valid": {"GAUGE", nil}, "herzi_reconcile_duration_seconds": {"HISTOGRAM", nil}, "herzi_sweep_duration_seconds": {"HISTOGRAM", nil},
+		"herzi_pool_blocked":        {"GAUGE", []string{"pool", "reason"}}, "herzi_pool_failure_class": {"GAUGE", []string{"class", "pool"}}, "herzi_orders_total": {"COUNTER", []string{"mode", "pool", "result"}}, "herzi_machines_ordered_total": {"COUNTER", []string{"pool"}}, "herzi_warnings_total": {"COUNTER", []string{"kind"}}, "herzi_install_errors_total": {"COUNTER", []string{"kind", "pool"}}, "herzi_install_http_responses_total": {"COUNTER", []string{"code"}}, "herzi_temporal_errors_total": {"COUNTER", []string{"kind", "op"}}, "herzi_install_request_duration_seconds": {"HISTOGRAM", nil}, "herzi_pollers": {"GAUGE", []string{"queue"}}, "herzi_config_valid": {"GAUGE", nil}, "herzi_reconcile_duration_seconds": {"HISTOGRAM", nil}, "herzi_sweep_duration_seconds": {"HISTOGRAM", nil},
 	}
 	for _, name := range []string{"demand", "assigned", "claimable", "settling", "stuck_agents", "open_runs", "target", "need", "probe_mode"} {
 		expected["herzi_pool_"+name] = struct {
@@ -156,4 +159,33 @@ func TestRemovedMetricsAreNotRegistered(t *testing.T) {
 	}
 	require.NoError(t, reg.Register(prometheus.NewGauge(prometheus.GaugeOpts{Name: "herzi_pool_ceiling", Help: "retired"})))
 	require.NoError(t, reg.Register(prometheus.NewCounter(prometheus.CounterOpts{Name: "herzi_would_remove_total", Help: "retired"})))
+}
+
+func TestInstallErrorKindsAreBounded(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := New(reg)
+	m.InstallResponse("p", 0, pipeline.KindTLSUntrusted, time.Millisecond)
+	m.InstallResponse("p", 0, "x509: certificate signed by unknown authority for 10.1.2.3", time.Millisecond)
+	m.InstallResponse("p", 9999, "", time.Millisecond)
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	seen := map[string]bool{}
+	for _, family := range families {
+		for _, sample := range family.Metric {
+			for _, label := range sample.Label {
+				if label.GetName() == "kind" || label.GetName() == "code" {
+					seen[family.GetName()+"="+label.GetValue()] = true
+				}
+			}
+		}
+	}
+	require.True(t, seen["herzi_install_errors_total=tls_certificate_not_trusted"])
+	require.True(t, seen["herzi_install_errors_total=other"], "an unknown kind must not become its own label value")
+	require.True(t, seen["herzi_install_http_responses_total=none"], "an out-of-range status must not become its own label value")
+	m.ForgetPool("p")
+	families, err = reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, "herzi_install_errors_total", family.GetName(), "forgetting a pool drops its install errors")
+	}
 }

@@ -67,6 +67,7 @@ func TestSuccessAndExactRequest(t *testing.T) {
 				defer server.Close()
 				i := newTestInstaller(t, server.URL+"/workflows/server-lifecycle/install-server", func(o *Options) { o.BearerToken = token }, server.Client())
 				got, err := i.Install(context.Background(), pipeline.InstallRequest{Key: "pool-a", Count: 2})
+				got.Duration = 0
 				want := pipeline.InstallResult{Requested: 2, Started: []int{2, 3}, Busy: []int{1}, Failed: []int{4}, HTTPCode: code}
 				if err != nil || !reflect.DeepEqual(got, want) || requests.Load() != 1 {
 					t.Fatalf("got %+v %v requests=%d", got, err, requests.Load())

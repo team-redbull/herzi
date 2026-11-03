@@ -54,6 +54,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 				f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": implausible demand"})
 			} else {
 				f.Demand += int(*np.Replicas)
+				f.NodePools = append(f.NodePools, NodePoolDemand{Name: object, Replicas: int(*np.Replicas)})
 			}
 		}
 		if msg != "" {
@@ -109,6 +110,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 		slices.SortFunc(f.Open, func(a, b SlotRun) int { return cmp.Compare(a.Slot, b.Slot) })
 		slices.SortFunc(f.Closed, func(a, b SlotRun) int { return cmp.Compare(a.Slot, b.Slot) })
 		slices.SortFunc(f.Problems, func(a, b Problem) int { return cmp.Compare(a.Msg, b.Msg) })
+		slices.SortFunc(f.NodePools, func(a, b NodePoolDemand) int { return cmp.Compare(a.Name, b.Name) })
 		f.Warnings = append([]Warning(nil), warnings...)
 		facts[key] = f
 	}

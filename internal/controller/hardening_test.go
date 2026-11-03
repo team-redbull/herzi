@@ -256,13 +256,22 @@ func TestSafeChangeOnlyLogging(t *testing.T) {
 		_, err := f.r.Reconcile(ctx, req)
 		require.NoError(t, err)
 	}
-	require.Empty(t, entries)
+	require.Len(t, entries, 1, "a healthy pool logs its status once and then only when it changes")
+	require.Equal(t, "Pool status", entries[0].msg)
 	f.sweep.result.Err = errors.New("https://user:secret@example.invalid?bearer=secret")
 	for range 3 {
 		_, err := f.r.Reconcile(ctx, req)
 		require.NoError(t, err)
 	}
-	require.Len(t, entries, 1)
+	var failures []logEntry
+	for _, entry := range entries {
+		if entry.err != nil {
+			failures = append(failures, entry)
+		}
+	}
+	require.Len(t, failures, 1, "the same error is logged once, not on every reconcile")
+	require.Equal(t, "Cannot read the install workflows from Temporal; ordering is blocked", failures[0].msg)
+	require.Contains(t, failures[0].err.Error(), "example.invalid", "the cause is visible")
 	f.sweep.result.Err = nil
 	require.NoError(t, f.c.Delete(ctx, agent("one", "p")))
 	f.install.err = fmt.Errorf("secret response: %w", pipeline.ErrRejected)
