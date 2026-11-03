@@ -160,6 +160,7 @@ jobs:
           path: bin/manager
           retention-days: 1
           if-no-files-found: error
+          overwrite: true # a re-run uploads the same name again
 
   publish:
     name: Publish image (GHCR)
