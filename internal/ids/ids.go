@@ -1,4 +1,4 @@
-// Package ids builds install-server workflow IDs compatible with the Python workflows service.
+// Package ids builds add-server-to-mce workflow IDs compatible with the Python workflows service.
 package ids
 
 import (
@@ -6,18 +6,19 @@ import (
 	"strings"
 )
 
-const prefix = "install-server"
+// Workflow is the workflows service name of the install workflow: the id prefix and, with "-workflow", the queue.
+const Workflow = "add-server-to-mce"
 
 // PoolSlot uses a one-based slot number.
 func PoolSlot(mce, infraEnv string, slot int) string {
-	return prefix + "-" + mce + "_" + infraEnv + "_" + strconv.Itoa(slot)
+	return Workflow + "-" + mce + "_" + infraEnv + "_" + strconv.Itoa(slot)
 }
 
 // Named lowercases server names to match the workflows service.
 func Named(mce, server string) string {
-	return prefix + "-" + mce + "_" + strings.ToLower(server)
+	return Workflow + "-" + mce + "_" + strings.ToLower(server)
 }
 
 func PoolPrefix(mce, infraEnv string) string {
-	return prefix + "-" + mce + "_" + infraEnv + "_"
+	return Workflow + "-" + mce + "_" + infraEnv + "_"
 }

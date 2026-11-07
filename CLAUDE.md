@@ -2,7 +2,7 @@
 
 herzi is a Kubernetes controller (Go, controller-runtime, Kubebuilder scaffold, no CRD of its own). On one OpenShift
 MCE hub it keeps each InfraEnv's pool of spare machines matched to HyperShift NodePool demand by calling the workflows
-`install-server` API. Read `docs/design/herzi-design.md` first: it is the source of truth for behaviour.
+`add-server-to-mce` API. Read `docs/design/herzi-design.md` first: it is the source of truth for behaviour.
 `AGENTS.md` holds the generic Kubebuilder rules.
 
 ## Hard rules
@@ -75,7 +75,7 @@ Unit tests with the fake client passing does not mean envtest passes: run the en
 - `internal/temporalx`: slot sweep via `DescribeWorkflowExecution` on fixed ids, failure types from the close event, queue pollers.
 - `internal/installer`: the single POST to the install route; unknown outcomes wrap `ErrAmbiguous`, 4xx wrap `ErrRejected`; never retries.
 - `internal/config`: strict loader (durations are strings), per-pool merge and validation, last-good store, file watcher.
-- `internal/ids`: workflow ids, pinned to the workflows repo (`shared/workflow_ids.py`): `install-server-<mce>_<infraEnv>_<slot>`.
+- `internal/ids`: workflow ids, pinned to the workflows repo (`shared/workflow_ids.py`): `add-server-to-mce-<mce>_<infraEnv>_<slot>`.
 - `internal/metrics`, `internal/kube`, `cmd/main.go`: Prometheus metrics, unstructured views, manager wiring.
 - `charts/herzi`: the Helm chart (exactly 21 packaged files; a test asserts the list). Fixtures are in `hack/chart/`.
 - `docs/design` (behaviour), `docs/ops` (install, operate, RBAC, runbook), `docs/review` (historical records, do not rewrite).

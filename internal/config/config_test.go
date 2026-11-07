@@ -160,11 +160,11 @@ func TestGoldenSample(t *testing.T) {
 	}
 	hub := config.DefaultHub()
 	hub.MCEName = "ocp4-bat-yam-01"
-	hub.InstallURL = "https://workflows-api.example.com/workflows/server-lifecycle/install-server"
+	hub.InstallURL = "https://workflows-api.example.com/workflows/server-lifecycle/add-server-to-mce"
 	hub.TemporalAddress = "temporal.example.com:7233"
 	hub.TemporalNamespace = "default"
 	hub.ActivityQueue = "server-lifecycle-activity-ocp4-bat-yam-01"
-	hub.WorkflowQueue = "install-server-workflow"
+	hub.WorkflowQueue = "add-server-to-mce-workflow"
 	hub.SegmentQueue = "segment-lifecycle-activity"
 	want := config.Config{HubConfig: hub, Defaults: config.PoolConfig{
 		HighPct: 30, MinFree: 2, MaxOpenRunsPerPool: 15, ProbeInterval: 20 * time.Minute,

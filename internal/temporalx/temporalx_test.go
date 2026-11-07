@@ -107,7 +107,7 @@ func TestStatusMappingAndIDs(t *testing.T) {
 		assert.Empty(t, run, "Describe must use latest run")
 		slot, err := strconv.Atoi(id[strings.LastIndex(id, "_")+1:])
 		assert.NoError(t, err)
-		assert.Equal(t, "install-server-ocp4-hub_pool_"+strconv.Itoa(slot), id)
+		assert.Equal(t, "add-server-to-mce-ocp4-hub_pool_"+strconv.Itoa(slot), id)
 		r := execution(statuses[slot-1].sdk, "run")
 		r.WorkflowExecutionInfo.StartTime = timestamppb.New(started)
 		r.WorkflowExecutionInfo.CloseTime = timestamppb.New(closed)
@@ -567,7 +567,7 @@ func TestQueues(t *testing.T) {
 		{"all errors", [3]int{}, [3]error{broken, broken, broken}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			names := []string{"install-server-workflow", "server-lifecycle-activity-ocp4-hub", "segment-lifecycle-activity"}
+			names := []string{"add-server-to-mce-workflow", "server-lifecycle-activity-ocp4-hub", "segment-lifecycle-activity"}
 			kinds := []enumspb.TaskQueueType{enumspb.TASK_QUEUE_TYPE_WORKFLOW, enumspb.TASK_QUEUE_TYPE_ACTIVITY, enumspb.TASK_QUEUE_TYPE_ACTIVITY}
 			calls := 0
 			observed := []string{}

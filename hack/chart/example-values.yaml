@@ -5,14 +5,14 @@ config:
   reconcileTimeout: 60s
   mceName: ocp4-example
   agentNamespace: inventory
-  installURL: https://workflows.example.invalid/workflows/server-lifecycle/install-server
+  installURL: https://workflows.example.invalid/workflows/server-lifecycle/add-server-to-mce
   maxSlots: 100
   ambiguousWait: 5m
   stuckAfter: 2h
   temporalAddress: temporal.example.invalid:7233
   temporalNamespace: default
   activityQueue: server-lifecycle-activity-ocp4-example
-  workflowQueue: install-server-workflow
+  workflowQueue: add-server-to-mce-workflow
   segmentQueue: segment-lifecycle-activity
   defaults:
     highPct: 10

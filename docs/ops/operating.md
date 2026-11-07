@@ -24,8 +24,8 @@ all RBAC and select `rbac.create: false` as described in [rbac.md](rbac.md).
 
 The controller pod must reach Kubernetes, Temporal's configured host:port and the
 workflows API. Set `config.installURL` to **the same full URL used today to call
-install-server**: use the Service address if the workflows brain is on this
-cluster, otherwise its Route, retaining `/workflows/server-lifecycle/install-server`.
+add-server-to-mce**: use the Service address if the workflows brain is on this
+cluster, otherwise its Route, retaining `/workflows/server-lifecycle/add-server-to-mce`.
 Do not invent a new endpoint. `config.mceName` is the canonical MCE name used in
 install requests, normally `ocp4-...`; match the hub worker queue and Temporal
 namespace. Confirm these network paths from the hub before enabling growth.
@@ -159,7 +159,7 @@ These are the 20 current top-level keys; controller fields are detailed in the
 | `resources` | Requests CPU `100m`/memory `128Mi`; limits CPU `"1"`/memory `512Mi`. |
 | `serviceAccount` | `create: true`, `name: ""`, `annotations: {}`; empty name uses release name when created, `default` otherwise. |
 | `rbac` | `create: true` gates all roles/bindings; `metricsReader.subjects: []`. |
-| `config` | `mceName: ""`, `installURL: ""`, `temporalAddress: ""` (required); `interval: 60s`, `reconcileTimeout: 60s`, `agentNamespace: inventory`, `maxSlots: 100`, `ambiguousWait: 5m`, `stuckAfter: 2h`, `temporalNamespace: default`, `activityQueue: ""` (derived), `workflowQueue: install-server-workflow`, `segmentQueue: segment-lifecycle-activity`; `defaults: {highPct: 10, minFree: 2, maxOpenRunsPerPool: 15, probeInterval: 20m, drawGrace: 2m, failureMemory: 6h, settlingMax: 60m, dryRunGrow: true, paused: false}`; `ignoreLabel: herzi.redbull.io/ignore`; `pools: {}`. |
+| `config` | `mceName: ""`, `installURL: ""`, `temporalAddress: ""` (required); `interval: 60s`, `reconcileTimeout: 60s`, `agentNamespace: inventory`, `maxSlots: 100`, `ambiguousWait: 5m`, `stuckAfter: 2h`, `temporalNamespace: default`, `activityQueue: ""` (derived), `workflowQueue: add-server-to-mce-workflow`, `segmentQueue: segment-lifecycle-activity`; `defaults: {highPct: 10, minFree: 2, maxOpenRunsPerPool: 15, probeInterval: 20m, drawGrace: 2m, failureMemory: 6h, settlingMax: 60m, dryRunGrow: true, paused: false}`; `ignoreLabel: herzi.redbull.io/ignore`; `pools: {}`. |
 | `temporal` | `tls.caCert: ""` (PEM; the chart creates the Secret), `tls.existingSecret: ""` (alternative, not both), `tls.caKey: ca.crt`. |
 | `metrics` | HTTPS metrics Service: `enabled: true`, `port: 8443`. |
 | `serviceMonitor` | `enabled: false`, `interval: 30s`, `labels: {}`, `endpoint: {}` (raw endpoint map). |
@@ -596,8 +596,8 @@ the blocked-pool alert. The test file is not a Kubernetes resource and is not re
 
 ## Upgrade and rollback
 
-Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
-are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
+Pool IDs are `add-server-to-mce-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
+are `add-server-to-mce-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
 after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
 are outside pool accounting. The authoritative builders are
 `/home/toto/code/workflows/shared/workflow_ids.py`.
@@ -605,7 +605,7 @@ are outside pool accounting. The authoritative builders are
 Runs started before the workflows PR keep their previous IDs and are not accounted
 for by this controller. Start every pool in dry run. Enable real growth
 (`dryRunGrow: false`) only after verifying in Temporal that no previous-ID install
-runs are still open. There is no automatic multi-family accounting.
+runs are still open: those started before the 2026-11-01 workflow rename keep `install-server-<mce>_...` ids, which this controller does not count. There is no automatic multi-family accounting.
 
 ### Configuration migration
 

@@ -44,7 +44,7 @@ func TestQueueNamesDefaultToTheWorkflowsRepoNames(t *testing.T) {
 	if cfg.ActivityQueue != "server-lifecycle-activity-ocp4-example" {
 		t.Fatalf("activity queue must derive from the hub: %q", cfg.ActivityQueue)
 	}
-	if cfg.WorkflowQueue != "install-server-workflow" || cfg.SegmentQueue != "segment-lifecycle-activity" {
+	if cfg.WorkflowQueue != "add-server-to-mce-workflow" || cfg.SegmentQueue != "segment-lifecycle-activity" {
 		t.Fatalf("queue defaults wrong: %q %q", cfg.WorkflowQueue, cfg.SegmentQueue)
 	}
 }
@@ -58,7 +58,7 @@ func TestTheShippedSampleUsesTheRealQueueNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SegmentQueue != "segment-lifecycle-activity" || cfg.WorkflowQueue != "install-server-workflow" {
+	if cfg.SegmentQueue != "segment-lifecycle-activity" || cfg.WorkflowQueue != "add-server-to-mce-workflow" {
 		t.Fatalf("sample queue names are wrong: %q %q", cfg.SegmentQueue, cfg.WorkflowQueue)
 	}
 }

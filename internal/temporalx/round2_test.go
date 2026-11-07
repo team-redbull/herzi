@@ -92,7 +92,7 @@ func TestF6LazyAcquisitionProofAndCache(t *testing.T) {
 			return e, nil
 		},
 		history: func(ctx context.Context, id string, run string, long bool, filter enumspb.HistoryEventFilterType) client.HistoryEventIterator {
-			require.Equal(t, "install-server-ocp4-hub_p_1", id)
+			require.Equal(t, "add-server-to-mce-ocp4-hub_p_1", id)
 			calls.Add(1)
 			require.Equal(t, "probe", run)
 			require.False(t, long)

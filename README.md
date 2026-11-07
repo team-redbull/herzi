@@ -11,7 +11,7 @@ account for machines still on their way.
 
 For each pool, herzi counts assigned, claimable and settling Agents plus open
 install runs. It targets demand plus a configurable spare buffer, rechecks live
-Kubernetes data before ordering, and calls the workflows install-server API in
+Kubernetes data before ordering, and calls the workflows add-server-to-mce API in
 bounded batches. Missing hardware triggers a one-machine probe every 20 minutes;
 uncertain reads and missing workers block growth rather than guessing.
 
@@ -42,7 +42,7 @@ ConfigMap ------------+                  v
                                Attribute -> Validate -> Decide -> Plan
                                          ^                 |
 Temporal Describe slots + queue pollers --+                 v
-                                                 workflows install-server
+                                                 workflows add-server-to-mce
                                                           |
                                                           v
                                                    Temporal -> Agents
@@ -132,14 +132,14 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | reconcileTimeout | 60s | Hub | Overall reconcile deadline |
 | mceName | Required/site-specific | Hub | Canonical MCE name, ocp4-... |
 | agentNamespace | inventory | Hub | InfraEnv/Agent namespace sent to installer |
-| installURL | Required/site-specific | Hub | Full /workflows/server-lifecycle/install-server route |
+| installURL | Required/site-specific | Hub | Full /workflows/server-lifecycle/add-server-to-mce route |
 | maxSlots | 100 | Hub | Must equal the API route slot range |
 | ambiguousWait | 5m | Hub | Persisted block after an unclear POST |
 | stuckAfter | 2h | Hub | Startup open-run warning age; exported as herzi_stuck_after_seconds; restart to change |
 | temporalAddress | Required/site-specific | Hub | Temporal host:port (plain gRPC unless Temporal TLS is enabled) |
 | temporalNamespace | default | Hub | Temporal namespace |
 | activityQueue | server-lifecycle-activity-<mceName> | Hub | Hub activity queue, derived from mceName when not written |
-| workflowQueue | install-server-workflow | Hub | Install workflow queue |
+| workflowQueue | add-server-to-mce-workflow | Hub | Install workflow queue |
 | segmentQueue | segment-lifecycle-activity | Hub | Segment activity queue |
 | highPct | 10 | Pool | Single target buffer percentage, integer half-up rounding |
 | minFree | 2 | Pool | Minimum spare buffer; include Replace upgrade surge |
@@ -172,8 +172,8 @@ Running recovery proof requires post-failure start, age >= drawGrace, and comple
 Unreadable failed history is `class="unknown"` and prevents Full spending.
 See [operations](docs/ops/operating.md) for durable state and strict loading.
 
-Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
-are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
+Pool IDs are `add-server-to-mce-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
+are `add-server-to-mce-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
 after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
 are outside pool accounting. The authoritative builders are
 `/home/toto/code/workflows/shared/workflow_ids.py`.
@@ -181,7 +181,7 @@ are outside pool accounting. The authoritative builders are
 Runs started before the workflows PR keep their previous IDs and are not accounted
 for by this controller. Pools start in dry run. Enable real growth
 (`dryRunGrow: false`) only after verifying in Temporal that no previous-ID install
-runs are still open. There is no automatic multi-family accounting.
+runs are still open: those started before the 2026-11-01 workflow rename keep `install-server-<mce>_...` ids, which this controller does not count. There is no automatic multi-family accounting.
 
 ### Configuration migration
 

@@ -48,7 +48,7 @@ func TestSuccessAndExactRequest(t *testing.T) {
 				server := newPipeServer(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
 					body, _ := io.ReadAll(r.Body)
-					if string(body) != strings.TrimSpace(string(golden)) || r.Method != "POST" || r.URL.Path != "/workflows/server-lifecycle/install-server" {
+					if string(body) != strings.TrimSpace(string(golden)) || r.Method != "POST" || r.URL.Path != "/workflows/server-lifecycle/add-server-to-mce" {
 						t.Errorf("request: %s %s %s", r.Method, r.URL.Path, body)
 					}
 					if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Accept") != "application/json" || !strings.HasPrefix(r.Header.Get("User-Agent"), "herzi/") {
@@ -65,7 +65,7 @@ func TestSuccessAndExactRequest(t *testing.T) {
 					_, _ = io.WriteString(w, mixedReport)
 				}))
 				defer server.Close()
-				i := newTestInstaller(t, server.URL+"/workflows/server-lifecycle/install-server", func(o *Options) { o.BearerToken = token }, server.Client())
+				i := newTestInstaller(t, server.URL+"/workflows/server-lifecycle/add-server-to-mce", func(o *Options) { o.BearerToken = token }, server.Client())
 				got, err := i.Install(context.Background(), pipeline.InstallRequest{Key: "pool-a", Count: 2})
 				got.Duration = 0
 				want := pipeline.InstallResult{Requested: 2, Started: []int{2, 3}, Busy: []int{1}, Failed: []int{4}, HTTPCode: code}

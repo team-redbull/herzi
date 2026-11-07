@@ -27,7 +27,7 @@ config:
   temporalAddress: "" # Required Temporal host:port.
   temporalNamespace: default # Temporal namespace.
   activityQueue: "" # Empty derives server-lifecycle-activity-<canonical mceName>.
-  workflowQueue: install-server-workflow # Workflow worker queue.
+  workflowQueue: add-server-to-mce-workflow # Workflow worker queue.
   segmentQueue: segment-lifecycle-activity # Segment worker queue.
   defaults:
     highPct: 10 # Spare percentage (0..1000), half-up rounding.
@@ -37,7 +37,7 @@ config:
     drawGrace: 2m # Wait for acquisition evidence; less than probeInterval.
     failureMemory: 6h # Remember failures; at least twice probeInterval.
     settlingMax: 60m # Unbound Agent age; at least probeInterval.
-    dryRunGrow: true # Log intended orders instead of calling install-server; set false per pool to go live.
+    dryRunGrow: true # Log intended orders instead of calling add-server-to-mce; set false per pool to go live.
     paused: false # Suspend growth for this pool.
   pools: {} # Optional per-InfraEnv overrides; every other InfraEnv uses the defaults. exclude: true ignores one.
 installer:

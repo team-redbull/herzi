@@ -3,7 +3,7 @@ interval: 60s
 reconcileTimeout: 60s
 mceName: ocp4-bat-yam-01
 agentNamespace: inventory
-installURL: https://workflows-api.example.com/workflows/server-lifecycle/install-server
+installURL: https://workflows-api.example.com/workflows/server-lifecycle/add-server-to-mce
 maxSlots: 100
 ambiguousWait: 5m
 stuckAfter: 2h
@@ -11,7 +11,7 @@ stuckAfter: 2h
 temporalAddress: temporal.example.com:7233
 temporalNamespace: default
 activityQueue: server-lifecycle-activity-ocp4-bat-yam-01
-workflowQueue: install-server-workflow
+workflowQueue: add-server-to-mce-workflow
 segmentQueue: segment-lifecycle-activity
 
 defaults:

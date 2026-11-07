@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/team-redbull/herzi/internal/ids"
+)
 
 func Defaults() PoolConfig {
 	return PoolConfig{HighPct: 10, MinFree: 2, DryRunGrow: true, MaxOpenRunsPerPool: 15,
@@ -8,7 +12,7 @@ func Defaults() PoolConfig {
 }
 
 const (
-	DefaultWorkflowQueue        = "install-server-workflow"
+	DefaultWorkflowQueue        = ids.Workflow + "-workflow"
 	DefaultSegmentQueue         = "segment-lifecycle-activity"
 	activityQueuePrefix         = "server-lifecycle-activity-"
 	DefaultTemporalNamespaceVal = "default"

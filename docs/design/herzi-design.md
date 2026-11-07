@@ -252,7 +252,7 @@ internal/pipeline/
     decide.go                  PURE  facts+config+now   -> Intent
     plan.go                    PURE  intent+limits      -> []InstallRequest
 internal/ids/                  workflow-id builders; a test pins them to the Python builders
-internal/installer/            I/O: POST install-server
+internal/installer/            I/O: POST add-server-to-mce
 internal/config/               Config, validation, last-good on a bad update
 charts/herzi/                  21-file package: metadata, defaults, schema, ignore, templates, rules
 hack/chart/                    example-values.yaml, monitoring-values.yaml, alerts.test.yaml
@@ -261,8 +261,8 @@ docs/design/notes/             package implementation decisions and index
 
 ## Workflow ids
 
-Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
-are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
+Pool IDs are `add-server-to-mce-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
+are `add-server-to-mce-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
 after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
 are outside pool accounting. The authoritative builders are
 `/home/toto/code/workflows/shared/workflow_ids.py`.
@@ -270,7 +270,7 @@ are outside pool accounting. The authoritative builders are
 Runs started before the workflows PR keep their previous IDs and are not accounted
 for by this controller. Start every pool in dry run. Enable real growth
 (`dryRunGrow: false`) only after verifying in Temporal that no previous-ID install
-runs are still open. There is no automatic multi-family accounting.
+runs are still open: those started before the 2026-11-01 workflow rename keep `install-server-<mce>_...` ids, which this controller does not count. There is no automatic multi-family accounting.
 
 ## Types
 
@@ -463,7 +463,7 @@ func Plan(g Grow, p PoolConfig, f PoolFacts) []InstallRequest {
 
 ```
 Counting open runs and merging durable evidence:
-  describe  install-server-<mce>_<infraEnv>_<1..100>   (parallelism ~10, per-call deadline)
+  describe  add-server-to-mce-<mce>_<infraEnv>_<1..100>   (parallelism ~10, per-call deadline)
   NotFound (errors.As serviceerror.NotFound) = free slot. Any other error = the pool is BLOCKED this pass.
   Describe(workflowId) with no run id returns the LATEST run and is strongly consistent, unlike a List.
   For slots closed Failed within failureMemory: read the failure type from the CLOSE EVENT
@@ -529,7 +529,7 @@ interval: 60s
 reconcileTimeout: 60s
 mceName: ocp4-<hub>
 agentNamespace: inventory
-installURL: https://<workflows-api>/workflows/server-lifecycle/install-server
+installURL: https://<workflows-api>/workflows/server-lifecycle/add-server-to-mce
 maxSlots: 100                       # must equal the route's slot range
 ambiguousWait: 5m                   # block after an unclear POST: protects against an API problem on this hub
 stuckAfter: 2h                      # an open run older than this => alert only
@@ -768,14 +768,14 @@ with no other supply needs 1. More supply never increases the order count.
 |---|---|
 | Framework | Kubebuilder scaffold, controller-runtime, no CRD |
 | Demand attribution | InfraEnv label in the selector; the selector must be only that label |
-| Route | `POST /workflows/server-lifecycle/install-server` with `count` ≤ 20 (no `/bulk`) |
+| Route | `POST /workflows/server-lifecycle/add-server-to-mce` with `count` ≤ 20 (no `/bulk`) |
 | Scrub | InfraEnv ignition override wipes disks before an Agent registers; assumed perfect |
 | Slot discovery | Describe sweep over fixed ids |
 | Unclear POSTs | block 5 min (annotation), then sweep; rare race accepted |
 | Double counting | all Running runs count; free machines count while settling (≤ 60 min) |
 | Upgrade surge | operator sizes `minFree`; most upgrades are InPlace |
 | Named / previous-ID installs | outside slot accounting; verify previous-ID runs closed before enabling growth |
-| Workflow ids | `install-server-<mce>_<infraEnv>_<slot>` and `install-server-<mce>_<lowercased-server>` |
+| Workflow ids | `add-server-to-mce-<mce>_<infraEnv>_<slot>` and `add-server-to-mce-<mce>_<lowercased-server>` |
 | Empty pool | probe of 1 machine every 20 minutes (server-scan state refreshes every ~15 min) |
 | Failure classes | capacity class = `ServerNotAvailableError`, `ServerReservedError`; other failures probe after 3 in a row |
 | No worker | zero pollers on any of the three queues => do not order |

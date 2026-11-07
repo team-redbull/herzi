@@ -7,10 +7,10 @@ import (
 
 func TestPinnedToThePythonBuilders(t *testing.T) {
 	cases := []struct{ got, want string }{
-		{PoolSlot("ocp4-mce-tlv-01", "dell-r650-tlv-64c-1024gb", 1), "install-server-ocp4-mce-tlv-01_dell-r650-tlv-64c-1024gb_1"},
-		{Named("ocp4-mce-tlv-01", "ocp-dell-x"), "install-server-ocp4-mce-tlv-01_ocp-dell-x"},
-		{Named("ocp4-mce-tlv-01", "ocp-hp-gen11-nyc-64c-128gb-HP0001592"), "install-server-ocp4-mce-tlv-01_ocp-hp-gen11-nyc-64c-128gb-hp0001592"},
-		{PoolPrefix("ocp4-mce-tlv-01", "ie"), "install-server-ocp4-mce-tlv-01_ie_"},
+		{PoolSlot("ocp4-mce-tlv-01", "dell-r650-tlv-64c-1024gb", 1), "add-server-to-mce-ocp4-mce-tlv-01_dell-r650-tlv-64c-1024gb_1"},
+		{Named("ocp4-mce-tlv-01", "ocp-dell-x"), "add-server-to-mce-ocp4-mce-tlv-01_ocp-dell-x"},
+		{Named("ocp4-mce-tlv-01", "ocp-hp-gen11-nyc-64c-128gb-HP0001592"), "add-server-to-mce-ocp4-mce-tlv-01_ocp-hp-gen11-nyc-64c-128gb-hp0001592"},
+		{PoolPrefix("ocp4-mce-tlv-01", "ie"), "add-server-to-mce-ocp4-mce-tlv-01_ie_"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
@@ -38,7 +38,7 @@ func TestDifferentHubsAndSlotsDiffer(t *testing.T) {
 }
 
 func TestHubPrefixDoesNotMatchExtendedMCEName(t *testing.T) {
-	prefix := "install-server-ocp4-a_"
+	prefix := "add-server-to-mce-ocp4-a_"
 	if !strings.HasPrefix(PoolSlot("ocp4-a", "ie", 1), prefix) {
 		t.Fatal("missing hub prefix")
 	}
@@ -50,7 +50,7 @@ func TestHubPrefixDoesNotMatchExtendedMCEName(t *testing.T) {
 }
 func TestEveryRunOfHubSharesHubPrefix(t *testing.T) {
 	for _, id := range []string{PoolSlot("ocp4-mce-tlv-01", "ie", 3), Named("ocp4-mce-tlv-01", "ocp-dell-x")} {
-		if !strings.HasPrefix(id, "install-server-ocp4-mce-tlv-01_") {
+		if !strings.HasPrefix(id, "add-server-to-mce-ocp4-mce-tlv-01_") {
 			t.Fatal(id)
 		}
 	}

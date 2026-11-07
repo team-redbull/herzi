@@ -1,7 +1,7 @@
 # herzi — build plan
 
 herzi is the **inventory controller**: it keeps each InfraEnv's pool of spare machines matched to
-HyperShift NodePool demand by calling the workflows `install-server` API. The full specification is
+HyperShift NodePool demand by calling the workflows `add-server-to-mce` API. The full specification is
 [`design/herzi-design.md`](design/herzi-design.md) (Part 1 logic with examples, Part 2 pseudocode, Part 3
 flaws and edge cases) with [`design/inventory-controller-original.md`](design/inventory-controller-original.md) retained as historical input.
 **The design document is the source of truth; if the code and the design disagree, fix one of them on purpose.**
@@ -54,8 +54,8 @@ settings block only that pool with `config_invalid`. Summed eligible demand abov
 arithmetic is checked even for inputs outside these limits: an unrepresentable
 calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot grow.
 
-Pool IDs are `install-server-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
-are `install-server-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
+Pool IDs are `add-server-to-mce-<mce>_<infraEnv>_<slot>` (slots 1–100); named IDs
+are `add-server-to-mce-<mce>_<lowercased-server>`. The first separator is `-`, then `_`
 after the MCE and InfraEnv. Exact slot Describes account for pool runs; named runs
 are outside pool accounting. The authoritative builders are
 `/home/toto/code/workflows/shared/workflow_ids.py`.
@@ -73,7 +73,7 @@ runs are still open. There is no automatic multi-family accounting.
 - A NodePool selects ONLY by the InfraEnv label; anything else blocks that pool.
 - All Agents on the hub are auto-approved. Disk wipe on release happens before an Agent registers.
 - Leader election ON. One reconcile per key. Pools reconcile in parallel (`MaxConcurrentReconciles` 4).
-- Workflow ids: `install-server-<mce>_<infraEnv>_<slot>`; named `install-server-<mce>_<lowercased-server>` (see `internal/ids`).
+- Workflow ids: `add-server-to-mce-<mce>_<infraEnv>_<slot>`; named `add-server-to-mce-<mce>_<lowercased-server>` (see `internal/ids`).
 - Probe mode: one machine every 20 min while hardware looks missing.
 
 ## Architecture
@@ -83,7 +83,7 @@ internal/kube/                 views over unstructured InfraEnv/NodePool/Agent  
 internal/config/               Config, merge, validation, strict load, Store              (WP2)
 internal/ids/                  workflow-id builders (DONE, pinned to Python)
 internal/pipeline/             PURE stages Attribute/Validate/Decide/Plan + ports          (WP1)
-internal/installer/            HTTP client of the install-server route                    (WP3)
+internal/installer/            HTTP client of the add-server-to-mce route                    (WP3)
 internal/temporalx/            slot sweep (Describe), failure types, queue pollers         (WP4)
 internal/metrics/              Prometheus metrics (names below)                           (controller WP)
 internal/controller/           reconciler, watches/mapping, annotations, recheck          (controller WP)

@@ -141,7 +141,7 @@ func TestAcceptedInstallIsLoggedAtInfoWithTheSlots(t *testing.T) {
 
 func TestBlockedPoolShowsTheRealErrorAndRepeatsEveryFiveMinutes(t *testing.T) {
 	run := newLogRun(t, testConfig(), infra("p"), node("workers", "p", 5))
-	run.f.sweep.result.Err = fmt.Errorf("describe slot install-server-ocp4-x_p_1: %w", status.Error(codes.Unavailable, "connection refused"))
+	run.f.sweep.result.Err = fmt.Errorf("describe slot add-server-to-mce-ocp4-x_p_1: %w", status.Error(codes.Unavailable, "connection refused"))
 	for range 3 {
 		run.reconcile(t, "p")
 	}
