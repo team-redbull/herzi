@@ -324,6 +324,7 @@ needed to detect a missing controller before pool series exist.
 ## Documentation
 
 - [Design, Parts 1–3](docs/design/herzi-design.md)
+- [Proposed: used Agents, and NodePools that draw from several InfraEnvs](docs/design/used-agents-and-multi-infraenv.md)
 - [Implementation decision notes](docs/design/notes/README.md)
 - [Plan, ownership, metric contract and production definition of done](docs/PLAN.md)
 - [Operating guide and real-hub verification](docs/ops/operating.md)
