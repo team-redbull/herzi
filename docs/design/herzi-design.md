@@ -5,6 +5,7 @@ VM creation and install-route idempotency remain backlog items.
 **Design source:** [`inventory-controller-original.md`](inventory-controller-original.md), superseded historical input.
 **Reviews applied:** two Codex reviews, a logic simulation review and a feasibility review.
 Independent round-2 safety fixes and the owner-approved add-only change are incorporated below.
+**Proposed, not implemented:** [used Agents, and NodePools that draw from several InfraEnvs](used-agents-and-multi-infraenv.md).
 
 | Part | What it is |
 |---|---|
@@ -790,3 +791,6 @@ with no other supply needs 1. More supply never increases the order count.
 - **Bare-metal pools in scope?**
 - **`InventoryPolicy` CRD** for per-pool config with status.
 - **Fencing for leader election**, if the residual risk proves real.
+- **Used Agents and multi-InfraEnv NodePools:** label every bound Agent `redbull.io/claimed` and take a labelled free
+  Agent out of the MCE through remove-server-from-mce. Count a NodePool whose selector is an `In` over InfraEnvs or
+  carries `DoesNotExist` expressions. Proposed in [used-agents-and-multi-infraenv.md](used-agents-and-multi-infraenv.md).
