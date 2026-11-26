@@ -3,7 +3,8 @@
 > [design](../design/herzi-design.md) and [operating guide](../ops/operating.md) now describe the contract. The
 > implementation differs from this plan in small ways: `herzi_retiring_agents` also has `paused` and `dry_run`
 > states, the slow alert is `HerziRetirementSlow` on `herzi_oldest_retiring_seconds`, and the retirer has no
-> config-reload watch (retiring Agents requeue every `interval`).
+> config-reload watch (retiring Agents requeue every `interval`). The label was renamed from `redbull.io/ever-installed`
+> to `redbull.io/claimed` before release; read every `ever-installed` below as `claimed`.
 
 # Plan: retire used servers
 

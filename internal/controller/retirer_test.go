@@ -112,7 +112,7 @@ func usedAgent(name, pool, server string) *unstructured.Unstructured {
 	if pool == "" {
 		delete(labels, kube.LabelInfraEnv)
 	}
-	labels[kube.LabelEverInstalled] = kube.EverInstalledValue
+	labels[kube.LabelClaimed] = kube.ClaimedValue
 	if server != "" {
 		labels[kube.LabelBMH] = server
 	}
@@ -128,7 +128,7 @@ func bound(u *unstructured.Unstructured) *unstructured.Unstructured {
 func guardedNode(name, pool string, replicas int64) *unstructured.Unstructured {
 	u := node(name, pool, replicas)
 	selector := u.Object["spec"].(map[string]any)["platform"].(map[string]any)["agent"].(map[string]any)["agentLabelSelector"].(map[string]any)
-	selector["matchExpressions"] = []any{map[string]any{"key": kube.LabelEverInstalled, "operator": "DoesNotExist"}}
+	selector["matchExpressions"] = []any{map[string]any{"key": kube.LabelClaimed, "operator": "DoesNotExist"}}
 	return u
 }
 
@@ -148,11 +148,11 @@ func TestRetirerLabelsEveryBoundAgent(t *testing.T) {
 	for _, name := range []string{"one", "two", "three", "stray"} {
 		u := kube.NewUnstructured(kube.AgentGVK)
 		require.NoError(t, f.c.Get(context.Background(), types.NamespacedName{Namespace: "inventory", Name: name}, u))
-		require.Equal(t, kube.EverInstalledValue, u.GetLabels()[kube.LabelEverInstalled], name)
+		require.Equal(t, kube.ClaimedValue, u.GetLabels()[kube.LabelClaimed], name)
 	}
 	u := kube.NewUnstructured(kube.AgentGVK)
 	require.NoError(t, f.c.Get(context.Background(), types.NamespacedName{Namespace: "inventory", Name: "free"}, u))
-	require.NotContains(t, u.GetLabels(), kube.LabelEverInstalled, "a free Agent that was never bound is not labelled")
+	require.NotContains(t, u.GetLabels(), kube.LabelClaimed, "a free Agent that was never bound is not labelled")
 	require.Equal(t, 4.0, metric(t, f.reg, "herzi_agents_labelled_total", nil))
 	require.Empty(t, f.remover.requests)
 
@@ -263,7 +263,7 @@ func TestRetirerDecidesAgainOnTheUncachedAgent(t *testing.T) {
 	require.Empty(t, f.remover.requests, "the API server says it is bound again")
 
 	held := usedAgent("used", "p", "srv-1")
-	held.SetLabels(map[string]string{kube.LabelInfraEnv: "p", kube.LabelEverInstalled: "true", kube.LabelBMH: "srv-1", kube.LabelAgentMachineRef: "m"})
+	held.SetLabels(map[string]string{kube.LabelInfraEnv: "p", kube.LabelClaimed: "true", kube.LabelBMH: "srv-1", kube.LabelAgentMachineRef: "m"})
 	f.r.Reader = fake.NewClientBuilder().WithObjects(held).Build()
 	f.retire(t, "used")
 	require.Empty(t, f.remover.requests, "held by an AgentMachine on the API server")

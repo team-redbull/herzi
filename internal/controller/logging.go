@@ -74,7 +74,7 @@ func describeBlock(reason string, hub config.HubConfig) blockLog {
 		d.msg, d.hub = "No worker is polling the Temporal segment queue; ordering is blocked", true
 		d.fields = []any{keyQueue, hub.SegmentQueue}
 	case "selector":
-		d.msg = "A NodePool selector must be only the InfraEnv label, optionally with the ever-installed exclusion; ordering is blocked"
+		d.msg = "A NodePool selector must be only the InfraEnv label, optionally with the claimed exclusion; ordering is blocked"
 	case "replicas":
 		d.msg = "A NodePool has no replicas (autoscaling?); ordering is blocked"
 	case "config_invalid":

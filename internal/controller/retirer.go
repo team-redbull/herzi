@@ -97,7 +97,7 @@ func (t *Retirer) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result,
 }
 
 func (t *Retirer) label(ctx context.Context, key types.NamespacedName, a kube.Agent) error {
-	patch := map[string]any{"metadata": map[string]any{"labels": map[string]any{kube.LabelEverInstalled: kube.EverInstalledValue}}}
+	patch := map[string]any{"metadata": map[string]any{"labels": map[string]any{kube.LabelClaimed: kube.ClaimedValue}}}
 	err := t.pool.mergePatch(ctx, kube.AgentGVK, key, patch)
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -108,7 +108,7 @@ func (t *Retirer) label(ctx context.Context, key types.NamespacedName, a kube.Ag
 	}
 	t.pool.Metrics.Labelled()
 	log.FromContext(ctx).Info("Labelled an Agent bound to a tenant cluster; it is removed from the MCE once released",
-		"agent", key.Name, keyPool, a.InfraEnvName(), "server", a.ServerName(), "label", kube.LabelEverInstalled)
+		"agent", key.Name, keyPool, a.InfraEnvName(), "server", a.ServerName(), "label", kube.LabelClaimed)
 	return nil
 }
 
@@ -206,7 +206,7 @@ func (t *Retirer) remove(ctx context.Context, cfg config.Config, key types.Names
 	return pipeline.RemoveDecision{State: pipeline.RetireRemoving, Reason: pipeline.WaitRunning, Server: d.Server}
 }
 
-// openRemovals counts Running remove runs among released ever-installed Agents; runs whose Agent is already gone
+// openRemovals counts Running remove runs among released claimed Agents; runs whose Agent is already gone
 // are not counted.
 func (t *Retirer) openRemovals(ctx context.Context, cfg config.Config) (int, error) {
 	list, err := listObjects(ctx, t.pool.Client, kube.AgentGVK, client.InNamespace(cfg.AgentNamespace))
@@ -262,7 +262,7 @@ var retireMessages = map[string]string{
 	pipeline.WaitNoServer:    "A used server has no agent-install.openshift.io/bmh label, so its server name is unknown; remove it by hand",
 	pipeline.WaitPoolUnknown: "Cannot read the used server's InfraEnv; removal waits",
 	pipeline.WaitNodePools:   "Cannot read every NodePool, so herzi cannot prove none can claim this used server; removal waits",
-	pipeline.WaitUnguarded:   "A NodePool can still claim this used server: its selector lacks redbull.io/ever-installed DoesNotExist; removal waits",
+	pipeline.WaitUnguarded:   "A NodePool can still claim this used server: its selector lacks redbull.io/claimed DoesNotExist; removal waits",
 	pipeline.WaitNoWorkers:   "No worker polls the remove workflow, activity or segment queue; removal waits",
 	pipeline.WaitRejected:    "The remove request was rejected by the API; retrying after removeRetryAfter",
 }

@@ -22,9 +22,9 @@ func Retirement(a kube.Agent) RetireStep {
 	switch {
 	case a.Deleting:
 		return RetireNothing
-	case a.Bound && !a.EverInstalled():
+	case a.Bound && !a.WasClaimed():
 		return RetireLabel
-	case a.Bound || !a.EverInstalled():
+	case a.Bound || !a.WasClaimed():
 		return RetireNothing
 	}
 	return RetireCandidate

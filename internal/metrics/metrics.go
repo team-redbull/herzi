@@ -128,14 +128,14 @@ func New(reg prometheus.Registerer) *Metrics {
 	m.stuckAfter = register(prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "herzi_stuck_after_seconds", Help: "Configured open run alert threshold"})).(prometheus.Gauge)
 	m.retiring = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_retiring_agents",
-		Help: "Released ever-installed Agents not yet removed, by state (blocked, paused, dry_run, waiting, removing)"},
+		Help: "Released claimed Agents not yet removed, by state (blocked, paused, dry_run, waiting, removing)"},
 		[]string{"state"})).(*prometheus.GaugeVec)
 	m.oldestRetiring = register(prometheus.NewGauge(prometheus.GaugeOpts{Name: "herzi_oldest_retiring_seconds",
 		Help: "Age of the oldest retiring Agent that is waiting or being removed; 0 when none"})).(prometheus.Gauge)
 	m.labelled = register(prometheus.NewCounter(prometheus.CounterOpts{Name: "herzi_agents_labelled_total",
-		Help: "Bound Agents labelled redbull.io/ever-installed"})).(prometheus.Counter)
+		Help: "Bound Agents labelled redbull.io/claimed"})).(prometheus.Counter)
 	m.labelErrors = register(prometheus.NewCounter(prometheus.CounterOpts{Name: "herzi_label_errors_total",
-		Help: "Failed ever-installed label patches"})).(prometheus.Counter)
+		Help: "Failed claimed label patches"})).(prometheus.Counter)
 	m.removals = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_removals_total",
 		Help: "remove-server-from-mce requests by result (started, already_running, ambiguous, rejected, dry_run)"},
 		[]string{"result"})).(*prometheus.CounterVec)

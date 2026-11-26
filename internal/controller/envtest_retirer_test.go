@@ -34,7 +34,7 @@ func labelOf(name string) func() string {
 		if k8sClient.Get(ctx, client.ObjectKey{Namespace: "inventory", Name: name}, u) != nil {
 			return ""
 		}
-		return u.GetLabels()[kube.LabelEverInstalled]
+		return u.GetLabels()[kube.LabelClaimed]
 	}
 }
 
@@ -99,7 +99,7 @@ var _ = Describe("Retiring used servers", func() {
 		Expect(k8sClient.Create(ctx, infra("r"))).To(Succeed())
 		Expect(k8sClient.Create(ctx, guardedNode("workers-r", "r", 2))).To(Succeed())
 		createAgent(withServer(bound(agent("used-1", "r")), "srv-1"))
-		Eventually(labelOf("used-1")).Should(Equal(kube.EverInstalledValue), "labelled on bind")
+		Eventually(labelOf("used-1")).Should(Equal(kube.ClaimedValue), "labelled on bind")
 		Consistently(remover.notify, time.Second, 100*time.Millisecond).ShouldNot(Receive(), "never removed while bound")
 
 		unbind("used-1")
@@ -108,7 +108,7 @@ var _ = Describe("Retiring used servers", func() {
 
 		Expect(k8sClient.Create(ctx, node("legacy-r", "r", 0))).To(Succeed())
 		createAgent(withServer(bound(agent("used-2", "r")), "srv-2"))
-		Eventually(labelOf("used-2")).Should(Equal(kube.EverInstalledValue))
+		Eventually(labelOf("used-2")).Should(Equal(kube.ClaimedValue))
 		unbind("used-2")
 		Consistently(remover.notify, 1500*time.Millisecond, 100*time.Millisecond).ShouldNot(Receive(),
 			"a NodePool without the exclusion could claim it")

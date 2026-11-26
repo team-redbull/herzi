@@ -217,20 +217,20 @@ func TestParserBoundaries(t *testing.T) {
 	}
 }
 func TestSelectorMatchesAsCAPIDoes(t *testing.T) {
-	exclusion := Requirement{Key: LabelEverInstalled, Operator: "DoesNotExist"}
+	exclusion := Requirement{Key: LabelClaimed, Operator: "DoesNotExist"}
 	require := func(ok bool, what string) {
 		t.Helper()
 		if !ok {
 			t.Fatal(what)
 		}
 	}
-	require(exclusion.IsEverInstalledExclusion(), "the exclusion")
-	for _, r := range []Requirement{{Key: LabelEverInstalled, Operator: "Exists"}, {Key: "other", Operator: "DoesNotExist"},
-		{Key: LabelEverInstalled, Operator: "DoesNotExist", Values: []string{"true"}}} {
-		require(!r.IsEverInstalledExclusion(), r.Key+" "+r.Operator)
+	require(exclusion.IsClaimedExclusion(), "the exclusion")
+	for _, r := range []Requirement{{Key: LabelClaimed, Operator: "Exists"}, {Key: "other", Operator: "DoesNotExist"},
+		{Key: LabelClaimed, Operator: "DoesNotExist", Values: []string{"true"}}} {
+		require(!r.IsClaimedExclusion(), r.Key+" "+r.Operator)
 	}
 	fresh := labels.Set{LabelInfraEnv: "a"}
-	used := labels.Set{LabelInfraEnv: "a", LabelEverInstalled: EverInstalledValue}
+	used := labels.Set{LabelInfraEnv: "a", LabelClaimed: ClaimedValue}
 	for _, tc := range []struct {
 		name        string
 		selector    Selector
@@ -247,9 +247,9 @@ func TestSelectorMatchesAsCAPIDoes(t *testing.T) {
 	}
 	_, err := Selector{Expressions: []Requirement{{Key: "k", Operator: "In"}}}.LabelSelector()
 	require(err != nil, "an In requirement without values is invalid")
-	a := Agent{Labels: map[string]string{LabelEverInstalled: "", LabelAgentMachineRef: "", LabelBMH: "srv-1"}}
-	require(a.EverInstalled() && a.HeldByMachine() && a.ServerName() == "srv-1", "agent label helpers")
-	require(!(Agent{}).EverInstalled() && !(Agent{}).HeldByMachine() && (Agent{}).ServerName() == "", "empty agent")
+	a := Agent{Labels: map[string]string{LabelClaimed: "", LabelAgentMachineRef: "", LabelBMH: "srv-1"}}
+	require(a.WasClaimed() && a.HeldByMachine() && a.ServerName() == "srv-1", "agent label helpers")
+	require(!(Agent{}).WasClaimed() && !(Agent{}).HeldByMachine() && (Agent{}).ServerName() == "", "empty agent")
 }
 
 func TestTransform(t *testing.T) {

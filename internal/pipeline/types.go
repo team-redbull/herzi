@@ -104,7 +104,7 @@ type PoolFacts struct {
 	Claimable   int
 	Settling    int
 	StuckAgents int
-	Retiring    int // labelled ever-installed and unbound; never supply
+	Retiring    int // labelled claimed and unbound; never supply
 
 	Open   []SlotRun
 	Closed []SlotRun

@@ -2,4 +2,4 @@ herzi is installed in {{ .Release.Namespace }}.
 The chart does not create a Namespace. Use --namespace herzi-system --create-namespace when installing.
 Inspect the rollout: kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ .Release.Name }}
 Every InfraEnv is managed and starts in dry run (dryRunGrow: true); set it to false per pool to place real orders. Example endpoints must be replaced before deployment.
-Every Agent bound to a tenant cluster is labelled redbull.io/ever-installed; once released it is only logged as "Would remove" (dryRunRemove: true) until you set dryRunRemove: false. Every NodePool must exclude that label (matchExpressions DoesNotExist) before removal can proceed.
+Every Agent bound to a tenant cluster is labelled redbull.io/claimed; once released it is only logged as "Would remove" (dryRunRemove: true) until you set dryRunRemove: false. Every NodePool must exclude that label (matchExpressions DoesNotExist) before removal can proceed.

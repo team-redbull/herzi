@@ -9,7 +9,7 @@ flaws and edge cases) with [`design/inventory-controller-original.md`](design/in
 ## Scope of v1
 Capacity is add-only: the controller never removes servers because of a surplus, and lowering demand or
 the buffer only stops additions. Used servers are retired: an Agent that was ever bound to a tenant cluster is
-labelled `redbull.io/ever-installed` and, once released, removed from the MCE through `remove-server-from-mce`
+labelled `redbull.io/claimed` and, once released, removed from the MCE through `remove-server-from-mce`
 (design cases 16 and 17). VM creation, orphan-binding detection and install-route idempotency remain backlog items.
 
 ```text
@@ -21,7 +21,7 @@ need   = target - (assigned + claimable + settling + open)
 With valid observations and an unblocked pool, positive need enters Full/Probe growth.
 At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
 before considering failures or probes. Capacity is never reclaimed because of a surplus: lowering demand or
-the buffer only stops additions. Spare capacity can persist indefinitely. Released ever-installed Agents are
+the buffer only stops additions. Spare capacity can persist indefinitely. Released claimed Agents are
 `retiring`, never supply.
 
 With defaults `highPct: 10` and `minFree: 2`:
@@ -143,10 +143,10 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 | `herzi_stuck_after_seconds` | gauge | none | startup-configured open-run alert threshold in seconds (process constant) |
 | `herzi_oldest_open_run_seconds` | gauge | pool | for the stuck-run alert |
 | `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`,`remove`) | poller counts |
-| `herzi_pool_retiring` | gauge | pool | released ever-installed Agents of a managed pool; never supply |
-| `herzi_retiring_agents` | gauge | state (`blocked`,`paused`,`dry_run`,`waiting`,`removing`) | released ever-installed Agents not yet removed, hub-wide |
+| `herzi_pool_retiring` | gauge | pool | released claimed Agents of a managed pool; never supply |
+| `herzi_retiring_agents` | gauge | state (`blocked`,`paused`,`dry_run`,`waiting`,`removing`) | released claimed Agents not yet removed, hub-wide |
 | `herzi_oldest_retiring_seconds` | gauge | — | age of the oldest `waiting` or `removing` Agent |
-| `herzi_agents_labelled_total` / `herzi_label_errors_total` | counter | — | ever-installed labels written / failed |
+| `herzi_agents_labelled_total` / `herzi_label_errors_total` | counter | — | claimed labels written / failed |
 | `herzi_removals_total` | counter | result (`started`,`already_running`,`ambiguous`,`rejected`,`dry_run`) | remove-server-from-mce requests |
 | `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, pool override matching no InfraEnv, ...) |
 | `herzi_config_valid` | gauge 0/1 | — | last config update accepted |

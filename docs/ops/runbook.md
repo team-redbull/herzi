@@ -260,7 +260,7 @@ Compare bound clusterDeploymentName references with active NodePools and hosted 
 
 ## HerziRetireBlocked
 
-At least one released used server (an unbound Agent carrying `redbull.io/ever-installed`) has waited 30 minutes on something a person must fix. It is not supply, so its pool already ordered a replacement; the old machine just stays on the MCE. The controller log names each Agent (`A used server ...`, fields `agent`, `server`, `reason`, `nodePool`).
+At least one released used server (an unbound Agent carrying `redbull.io/claimed`) has waited 30 minutes on something a person must fix. It is not supply, so its pool already ordered a replacement; the old machine just stays on the MCE. The controller log names each Agent (`A used server ...`, fields `agent`, `server`, `reason`, `nodePool`).
 
 ```promql
 herzi_retiring_agents{state="blocked"}
@@ -268,12 +268,12 @@ herzi_retiring_agents{state="blocked"}
 
 ```bash
 kubectl -n herzi-system logs deployment/herzi -c manager --since=1h | grep -E 'used server'
-kubectl -n inventory get agents.agent-install.openshift.io -l redbull.io/ever-installed -L agent-install.openshift.io/bmh,agentMachineRef
+kubectl -n inventory get agents.agent-install.openshift.io -l redbull.io/claimed -L agent-install.openshift.io/bmh,agentMachineRef
 ```
 
 By `reason`:
 
-- `unguarded nodepool`: the named NodePool's `agentLabelSelector` still matches the Agent, so CAPI could claim it. Add `{key: redbull.io/ever-installed, operator: DoesNotExist}` to its `matchExpressions` (try a non-production NodePool first; on `upgradeType: Replace` a selector change may roll its nodes), or delete the NodePool if it is unused.
+- `unguarded nodepool`: the named NodePool's `agentLabelSelector` still matches the Agent, so CAPI could claim it. Add `{key: redbull.io/claimed, operator: DoesNotExist}` to its `matchExpressions` (try a non-production NodePool first; on `upgradeType: Replace` a selector change may roll its nodes), or delete the NodePool if it is unused.
 - `no bmh label`: herzi will not guess a server name. Find the server from the Agent's BareMetalHost or inventory and run remove-server-from-mce for it by hand through the workflows UI or API; never use the Agent name, which is a UUID.
 - `held by an AgentMachine`: CAPI has not finished releasing it. Check the AgentMachine named by the `agentMachineRef` label; remove a stale label only after confirming HyperShift released the machine.
 - `no workers`: the remove workflow, activity or segment queue has no pollers; see [HerziQueueHasNoPollers](#no-pollers).

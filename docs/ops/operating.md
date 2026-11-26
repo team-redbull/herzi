@@ -327,7 +327,7 @@ With valid observations and an unblocked pool, positive need enters Full/Probe g
 At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
 before considering failures or probes. Capacity is never reclaimed because of a surplus: lowering demand or
 the buffer only stops additions. Spare capacity can persist indefinitely. Released Agents labelled
-`redbull.io/ever-installed` are `retiring`, never supply ([Retiring used servers](#retiring-used-servers)).
+`redbull.io/claimed` are `retiring`, never supply ([Retiring used servers](#retiring-used-servers)).
 
 With defaults `highPct: 10` and `minFree: 2`:
 
@@ -359,7 +359,7 @@ permanent capacity.
 A server that was installed on a tenant cluster never returns to the spare pool. The retirer (a second controller in
 the same pod, keyed per Agent, covering every Agent in `agentNamespace`, ignored and excluded pools included):
 
-1. labels a bound Agent `redbull.io/ever-installed: "true"` within seconds of the bind, whatever pause, ignore or
+1. labels a bound Agent `redbull.io/claimed: "true"` within seconds of the bind, whatever pause, ignore or
    dry run say. CAPI never re-checks the selector after it picks an Agent, so the label cannot disturb an install;
 2. treats a released labelled Agent as `retiring`: it is never claimable, settling or stuck, so the pool orders fresh
    machines instead;
@@ -382,7 +382,7 @@ spec:
         matchLabels:
           infraenvs.agent-install.openshift.io: <infraEnv>
         matchExpressions:
-        - key: redbull.io/ever-installed
+        - key: redbull.io/claimed
           operator: DoesNotExist
 ```
 

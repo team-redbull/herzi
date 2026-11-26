@@ -25,7 +25,7 @@ func nodePool() kube.NodePool {
 	return kube.NodePool{Name: "np", PlatformType: "Agent", Replicas: &n, Selector: kube.Selector{MatchLabels: map[string]string{kube.LabelInfraEnv: "a"}}}
 }
 func exclusion() kube.Requirement {
-	return kube.Requirement{Key: kube.LabelEverInstalled, Operator: "DoesNotExist"}
+	return kube.Requirement{Key: kube.LabelClaimed, Operator: "DoesNotExist"}
 }
 func agent() kube.Agent {
 	return kube.Agent{Name: "agent", Labels: map[string]string{kube.LabelInfraEnv: "a"}, Approved: true, Connected: true, State: kube.StateKnownUnbound, LastStateChange: clockTime().Add(-time.Minute)}

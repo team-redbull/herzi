@@ -11,7 +11,7 @@ import (
 
 func retiringAgent() kube.Agent {
 	a := agent()
-	a.Labels[kube.LabelEverInstalled] = kube.EverInstalledValue
+	a.Labels[kube.LabelClaimed] = kube.ClaimedValue
 	a.Labels[kube.LabelBMH] = "srv-1"
 	return a
 }
@@ -35,12 +35,12 @@ func TestRetirement(t *testing.T) {
 	}{
 		{"free unlabelled", func(*kube.Agent) {}, RetireNothing},
 		{"bound unlabelled is labelled", func(a *kube.Agent) { a.Bound = true }, RetireLabel},
-		{"bound labelled", func(a *kube.Agent) { a.Bound = true; a.Labels[kube.LabelEverInstalled] = "true" }, RetireNothing},
-		{"released labelled is a candidate", func(a *kube.Agent) { a.Labels[kube.LabelEverInstalled] = "true" }, RetireCandidate},
-		{"stray labelled is a candidate", func(a *kube.Agent) { a.Labels = map[string]string{kube.LabelEverInstalled: "true"} }, RetireCandidate},
+		{"bound labelled", func(a *kube.Agent) { a.Bound = true; a.Labels[kube.LabelClaimed] = "true" }, RetireNothing},
+		{"released labelled is a candidate", func(a *kube.Agent) { a.Labels[kube.LabelClaimed] = "true" }, RetireCandidate},
+		{"stray labelled is a candidate", func(a *kube.Agent) { a.Labels = map[string]string{kube.LabelClaimed: "true"} }, RetireCandidate},
 		{"stray bound is labelled", func(a *kube.Agent) { a.Labels = nil; a.Bound = true }, RetireLabel},
 		{"deleting bound is left alone", func(a *kube.Agent) { a.Bound = true; a.Deleting = true }, RetireNothing},
-		{"deleting labelled is left alone", func(a *kube.Agent) { a.Labels[kube.LabelEverInstalled] = "true"; a.Deleting = true }, RetireNothing},
+		{"deleting labelled is left alone", func(a *kube.Agent) { a.Labels[kube.LabelClaimed] = "true"; a.Deleting = true }, RetireNothing},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			a := agent()
@@ -70,7 +70,7 @@ func TestDecideRemoveGates(t *testing.T) {
 		{name: "stray agent removes", change: func(in *RemoveInput) { delete(in.Agent.Labels, kube.LabelInfraEnv) }, state: RetireRemoving},
 		{name: "other pools and platforms do not guard", change: func(in *RemoveInput) { in.NodePools = append(in.NodePools, otherPool, aws) }, state: RetireRemoving},
 		{name: "bound", change: func(in *RemoveInput) { in.Agent.Bound = true }, reason: WaitNotRetiring},
-		{name: "unlabelled", change: func(in *RemoveInput) { delete(in.Agent.Labels, kube.LabelEverInstalled) }, reason: WaitNotRetiring},
+		{name: "unlabelled", change: func(in *RemoveInput) { delete(in.Agent.Labels, kube.LabelClaimed) }, reason: WaitNotRetiring},
 		{name: "deleting", change: func(in *RemoveInput) { in.Agent.Deleting = true }, reason: WaitNotRetiring},
 		{name: "held by an AgentMachine", change: func(in *RemoveInput) { in.Agent.Labels[kube.LabelAgentMachineRef] = "m" }, state: RetireBlocked, reason: WaitHeld},
 		{name: "no bmh label", change: func(in *RemoveInput) { delete(in.Agent.Labels, kube.LabelBMH) }, state: RetireBlocked, reason: WaitNoServer},

@@ -110,8 +110,8 @@ groups:
       severity: warning
     annotations:
       summary: Used servers cannot be removed from the MCE
-      description: Released ever-installed Agents wait on something a person must fix (no bmh label, a NodePool
-        without the ever-installed exclusion, no workers, a rejected request); the controller log names each one.
+      description: Released claimed Agents wait on something a person must fix (no bmh label, a NodePool
+        without the claimed exclusion, no workers, a rejected request); the controller log names each one.
       runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#retire-blocked
   - alert: HerziRetirementSlow
     expr: herzi_oldest_retiring_seconds > 7200

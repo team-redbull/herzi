@@ -21,7 +21,7 @@ ServiceAccount creation is controlled separately by `serviceAccount.create` and 
 
 | API group | Resource | Verbs | Why |
 |---|---|---|---|
-| agent-install.openshift.io | agents | get, list, watch, patch | supply (the Agent informer, plus the uncached recheck); patch writes only the `redbull.io/ever-installed` label on a bound Agent |
+| agent-install.openshift.io | agents | get, list, watch, patch | supply (the Agent informer, plus the uncached recheck); patch writes only the `redbull.io/claimed` label on a bound Agent |
 | agent-install.openshift.io | infraenvs | get, list, watch, patch | the pools; patch writes only the `herzi.redbull.io/*` annotations (block marker, pause, durable state) |
 | hypershift.openshift.io | nodepools | get, list, watch | demand, across all tenant namespaces |
 

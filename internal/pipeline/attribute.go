@@ -46,7 +46,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 		case !known:
 			msg = "unknown InfraEnv"
 		case len(np.Selector.MatchLabels) != 1 || !onlyExclusion(np.Selector.Expressions):
-			f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": selector must be only the InfraEnv label, optionally with the ever-installed exclusion"})
+			f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": selector must be only the InfraEnv label, optionally with the claimed exclusion"})
 		case np.Replicas == nil:
 			f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": no replicas (autoscaling?)"})
 		default:
@@ -75,7 +75,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 			f.Assigned++
 		case a.Deleting:
 			continue
-		case a.EverInstalled():
+		case a.WasClaimed():
 			f.Retiring++
 		case a.Approved && a.Connected && a.State == kube.StateKnownUnbound && !a.HeldByMachine():
 			f.Claimable++
@@ -121,5 +121,5 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 func hasInfraEnvLabel(labels map[string]string) bool { _, ok := labels[kube.LabelInfraEnv]; return ok }
 
 func onlyExclusion(expressions []kube.Requirement) bool {
-	return len(expressions) == 0 || (len(expressions) == 1 && expressions[0].IsEverInstalledExclusion())
+	return len(expressions) == 0 || (len(expressions) == 1 && expressions[0].IsClaimedExclusion())
 }

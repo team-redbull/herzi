@@ -14,9 +14,9 @@ const (
 	LabelInfraEnv = "infraenvs.agent-install.openshift.io"
 	// LabelAgentMachineRef marks an Agent held by an AgentMachine.
 	LabelAgentMachineRef = "agentMachineRef"
-	// LabelEverInstalled marks an Agent that was bound to a tenant cluster; the key alone retires it.
-	LabelEverInstalled = "redbull.io/ever-installed"
-	EverInstalledValue = "true"
+	// LabelClaimed marks an Agent that was bound to a tenant cluster; the key alone retires it.
+	LabelClaimed = "redbull.io/claimed"
+	ClaimedValue = "true"
 	// LabelBMH holds the lowercased server-scan name, the only server identity sent to remove-server-from-mce.
 	LabelBMH = "agent-install.openshift.io/bmh"
 
@@ -56,9 +56,9 @@ type Selector struct {
 	Expressions []Requirement
 }
 
-// IsEverInstalledExclusion is the one expression a NodePool may add to its InfraEnv label.
-func (r Requirement) IsEverInstalledExclusion() bool {
-	return r.Key == LabelEverInstalled && r.Operator == string(metav1.LabelSelectorOpDoesNotExist) && len(r.Values) == 0
+// IsClaimedExclusion is the one expression a NodePool may add to its InfraEnv label.
+func (r Requirement) IsClaimedExclusion() bool {
+	return r.Key == LabelClaimed && r.Operator == string(metav1.LabelSelectorOpDoesNotExist) && len(r.Values) == 0
 }
 
 // LabelSelector evaluates the selector as CAPI does: an empty selector matches every Agent.
@@ -97,8 +97,8 @@ type Agent struct {
 
 func (a Agent) InfraEnvName() string { return a.Labels[LabelInfraEnv] }
 
-// EverInstalled tests the key, as a NodePool's DoesNotExist exclusion does.
-func (a Agent) EverInstalled() bool { _, ok := a.Labels[LabelEverInstalled]; return ok }
+// WasClaimed tests the key, as a NodePool's DoesNotExist exclusion does.
+func (a Agent) WasClaimed() bool { _, ok := a.Labels[LabelClaimed]; return ok }
 
 func (a Agent) HeldByMachine() bool { _, ok := a.Labels[LabelAgentMachineRef]; return ok }
 

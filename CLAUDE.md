@@ -9,7 +9,7 @@ MCE hub it keeps each InfraEnv's pool of spare machines matched to HyperShift No
 
 - **Capacity is add-only; used servers are retired.** Target, supply and Hold never remove capacity: there is no ceiling,
   shrink or cooldown, and `lowPct` and `minBand` stay rejected by the config loader. The one removal is retiring: an Agent
-  that was ever bound to a tenant cluster is labelled `redbull.io/ever-installed` and, once released, removed from the MCE
+  that was ever bound to a tenant cluster is labelled `redbull.io/claimed` and, once released, removed from the MCE
   through the workflows `remove-server-from-mce` route. herzi holds no Kubernetes delete verb; the workflow worker deletes.
 - **Fail closed.** Unknown, errored or ambiguous observations block the pool; they are never counted as zero. An unknown
   failure never permits a full order.
@@ -87,7 +87,7 @@ Unit tests with the fake client passing does not mean envtest passes: run the en
 ## Behaviour that must not change without a design decision
 
 - target = demand + max(`minFree`, (`highPct` x demand + 50) / 100), integer half-up; defaults `highPct` 10 (cap 1000), `minFree` 2
-  (cap 100000). Supply = assigned + claimable + settling + open runs. An unbound Agent carrying the `redbull.io/ever-installed`
+  (cap 100000). Supply = assigned + claimable + settling + open runs. An unbound Agent carrying the `redbull.io/claimed`
   key is `retiring` and never supply. `need <= 0` holds before any probe logic.
 - Order only against a sweep observed after the previous attempt; the sweeper cache is invalidated after every POST.
 - The block marker (`herzi.redbull.io/blocked-until`) is written BEFORE the POST with its own bounded context and cleared after a

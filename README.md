@@ -16,7 +16,7 @@ bounded batches. Missing hardware triggers a one-machine probe every 20 minutes;
 uncertain reads and missing workers block growth rather than guessing.
 
 A server that was installed on a tenant cluster never returns to the spare pool: herzi labels every Agent bound to a
-cluster `redbull.io/ever-installed`, stops counting it once it is released, and asks the workflows
+cluster `redbull.io/claimed`, stops counting it once it is released, and asks the workflows
 remove-server-from-mce API to take it off the MCE.
 
 herzi owns no CRD and watches the operators' InfraEnv, Agent and NodePool resources
@@ -51,7 +51,7 @@ Temporal Describe slots + queue pollers --+                 v
                                                           v
                                                    Temporal -> Agents
 
-Agents (bound) --> retirer: label redbull.io/ever-installed
+Agents (bound) --> retirer: label redbull.io/claimed
 Agents (released, labelled) --> retirer gates --> workflows remove-server-from-mce
 
 Lease: one active controller     HTTPS metrics: Prometheus -> alerts -> runbook
@@ -229,7 +229,7 @@ With valid observations and an unblocked pool, positive need enters Full/Probe g
 At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
 before considering failures or probes. Capacity is never reclaimed because of a surplus: lowering demand or
 the buffer only stops additions, and spare capacity can persist indefinitely. A released Agent labelled
-`redbull.io/ever-installed` is `retiring`, not supply, and is removed from the MCE by the retirer.
+`redbull.io/claimed` is `retiring`, not supply, and is removed from the MCE by the retirer.
 
 With defaults `highPct: 10` and `minFree: 2`:
 
@@ -325,9 +325,9 @@ preceding `herzi_pool_` prefix (for example `_assigned` means `herzi_pool_assign
 | `herzi_stuck_after_seconds` | gauge | none | Startup stuckAfter threshold in seconds; process constant |
 | `herzi_oldest_open_run_seconds` | gauge | pool | for the stuck-run alert |
 | `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`,`remove`) | poller counts |
-| `herzi_retiring_agents` | gauge | state (`blocked`,`paused`,`dry_run`,`waiting`,`removing`) | released ever-installed Agents not yet removed, hub-wide |
+| `herzi_retiring_agents` | gauge | state (`blocked`,`paused`,`dry_run`,`waiting`,`removing`) | released claimed Agents not yet removed, hub-wide |
 | `herzi_oldest_retiring_seconds` | gauge | — | age of the oldest `waiting` or `removing` Agent |
-| `herzi_agents_labelled_total` / `herzi_label_errors_total` | counter | — | ever-installed labels written / failed |
+| `herzi_agents_labelled_total` / `herzi_label_errors_total` | counter | — | claimed labels written / failed |
 | `herzi_removals_total` | counter | result (`started`,`already_running`,`ambiguous`,`rejected`,`dry_run`) | remove-server-from-mce requests |
 | `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, pool override matching no InfraEnv, ...) |
 | `herzi_config_valid` | gauge 0/1 | — | last config update accepted |

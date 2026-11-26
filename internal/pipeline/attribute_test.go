@@ -71,15 +71,15 @@ func TestAttributeNodePoolRules(t *testing.T) {
 		{name: "expressions", change: func(n *kube.NodePool) {
 			n.Selector.Expressions = []kube.Requirement{{Key: "other", Operator: "Exists"}}
 		}, problem: true},
-		{name: "ever-installed exclusion allowed", change: func(n *kube.NodePool) { n.Selector.Expressions = []kube.Requirement{exclusion()} }, demand: 3},
+		{name: "claimed exclusion allowed", change: func(n *kube.NodePool) { n.Selector.Expressions = []kube.Requirement{exclusion()} }, demand: 3},
 		{name: "exclusion plus another expression", change: func(n *kube.NodePool) {
 			n.Selector.Expressions = []kube.Requirement{exclusion(), {Key: "other", Operator: "Exists"}}
 		}, problem: true},
 		{name: "exclusion with values", change: func(n *kube.NodePool) {
-			n.Selector.Expressions = []kube.Requirement{{Key: kube.LabelEverInstalled, Operator: "DoesNotExist", Values: []string{"true"}}}
+			n.Selector.Expressions = []kube.Requirement{{Key: kube.LabelClaimed, Operator: "DoesNotExist", Values: []string{"true"}}}
 		}, problem: true},
-		{name: "ever-installed with another operator", change: func(n *kube.NodePool) {
-			n.Selector.Expressions = []kube.Requirement{{Key: kube.LabelEverInstalled, Operator: "NotIn", Values: []string{"true"}}}
+		{name: "claimed with another operator", change: func(n *kube.NodePool) {
+			n.Selector.Expressions = []kube.Requirement{{Key: kube.LabelClaimed, Operator: "NotIn", Values: []string{"true"}}}
 		}, problem: true},
 		{name: "nil replicas", change: func(n *kube.NodePool) { n.Replicas = nil; n.AutoScaling = true }, problem: true},
 		{name: "zero replicas", change: func(n *kube.NodePool) { v := int32(0); n.Replicas = &v }},
@@ -117,19 +117,19 @@ func TestAttributeAgentRules(t *testing.T) {
 		assigned, claimable, settling, stuck, retiring int
 		warn                                           bool
 	}{
-		{name: "labelled bound stays assigned", change: func(a *kube.Agent) { a.Bound = true; a.Labels[kube.LabelEverInstalled] = "true" }, assigned: 1},
-		{name: "labelled unbound is retiring, not claimable", change: func(a *kube.Agent) { a.Labels[kube.LabelEverInstalled] = "true" }, retiring: 1},
-		{name: "any label value retires", change: func(a *kube.Agent) { a.Labels[kube.LabelEverInstalled] = "" }, retiring: 1},
+		{name: "labelled bound stays assigned", change: func(a *kube.Agent) { a.Bound = true; a.Labels[kube.LabelClaimed] = "true" }, assigned: 1},
+		{name: "labelled unbound is retiring, not claimable", change: func(a *kube.Agent) { a.Labels[kube.LabelClaimed] = "true" }, retiring: 1},
+		{name: "any label value retires", change: func(a *kube.Agent) { a.Labels[kube.LabelClaimed] = "" }, retiring: 1},
 		{name: "labelled rebooting is retiring, not settling", change: func(a *kube.Agent) {
-			a.Labels[kube.LabelEverInstalled] = "true"
+			a.Labels[kube.LabelClaimed] = "true"
 			a.Approved = false
 		}, retiring: 1},
 		{name: "labelled old is retiring, not stuck", change: func(a *kube.Agent) {
-			a.Labels[kube.LabelEverInstalled] = "true"
+			a.Labels[kube.LabelClaimed] = "true"
 			a.Approved = false
 			a.LastStateChange = clockTime().Add(-2 * time.Hour)
 		}, retiring: 1},
-		{name: "labelled deleting is ignored", change: func(a *kube.Agent) { a.Labels[kube.LabelEverInstalled] = "true"; a.Deleting = true }},
+		{name: "labelled deleting is ignored", change: func(a *kube.Agent) { a.Labels[kube.LabelClaimed] = "true"; a.Deleting = true }},
 		{name: "claimable", change: func(*kube.Agent) {}, claimable: 1},
 		{name: "bound before deleting", change: func(a *kube.Agent) { a.Bound = true; a.Deleting = true }, assigned: 1},
 		{name: "deleting", change: func(a *kube.Agent) { a.Deleting = true }},
