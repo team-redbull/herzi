@@ -21,11 +21,18 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
+// createAgent sets status on a fresh read: the retirer may label a bound Agent between Create and the status write.
 func createAgent(u *unstructured.Unstructured) {
 	status := u.Object["status"]
 	Expect(k8sClient.Create(ctx, u)).To(Succeed())
-	u.Object["status"] = status
-	Expect(k8sClient.Status().Update(ctx, u)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh := kube.NewUnstructured(kube.AgentGVK)
+		if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(u), fresh); err != nil {
+			return err
+		}
+		fresh.Object["status"] = status
+		return k8sClient.Status().Update(ctx, fresh)
+	})).To(Succeed())
 }
 
 func labelOf(name string) func() string {

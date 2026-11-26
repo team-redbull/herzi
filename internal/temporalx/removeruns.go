@@ -10,8 +10,8 @@ import (
 	"github.com/team-redbull/herzi/internal/pipeline"
 )
 
-// RemoveRuns describes remove-server-from-mce ids; calls for one server share an in-flight Describe and its result
-// is reused for CacheTTL. Errors are never cached.
+// RemoveRuns describes a server's remove-server-from-mce and uninstall-server-from-hc ids; calls for one id share an
+// in-flight Describe and its result is reused for CacheTTL. Errors are never cached.
 type RemoveRuns struct {
 	opts    Options
 	mu      sync.Mutex
@@ -34,10 +34,18 @@ func NewRemoveRuns(o Options) *RemoveRuns {
 
 // Describe reports StatusNotFound for a server that never had a remove run.
 func (r *RemoveRuns) Describe(ctx context.Context, server string) (pipeline.RemoveRun, error) {
+	return r.describe(ctx, ids.RemoveServer(server))
+}
+
+// DescribeUninstall is Describe for the server's uninstall-server-from-hc id.
+func (r *RemoveRuns) DescribeUninstall(ctx context.Context, server string) (pipeline.RemoveRun, error) {
+	return r.describe(ctx, ids.UninstallServer(server))
+}
+
+func (r *RemoveRuns) describe(ctx context.Context, id string) (pipeline.RemoveRun, error) {
 	if err := ctx.Err(); err != nil {
 		return pipeline.RemoveRun{}, err
 	}
-	id := ids.RemoveServer(server)
 	r.mu.Lock()
 	now := r.opts.Now()
 	for key, e := range r.entries {

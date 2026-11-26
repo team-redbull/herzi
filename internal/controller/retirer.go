@@ -131,6 +131,7 @@ func (t *Retirer) observe(ctx context.Context, cfg config.Config, a kube.Agent, 
 	in.Pollers = t.pool.cachedPollers(ctx, now)
 	if server := a.ServerName(); server != "" {
 		in.Run, in.RunErr = t.Runs.Describe(ctx, server)
+		in.Uninstall, in.UninstallErr = t.Runs.DescribeUninstall(ctx, server)
 	}
 	return in
 }

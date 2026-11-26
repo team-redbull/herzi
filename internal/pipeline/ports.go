@@ -48,9 +48,11 @@ type Remover interface {
 	Remove(ctx context.Context, req RemoveRequest) (RemoveResult, error)
 }
 
-// RemoveRuns describes a server's remove id; Invalidate discards what was observed before a removal request.
+// RemoveRuns describes a server's remove and uninstall ids; Invalidate discards the remove id observed before a
+// removal request.
 type RemoveRuns interface {
 	Describe(ctx context.Context, server string) (RemoveRun, error)
+	DescribeUninstall(ctx context.Context, server string) (RemoveRun, error)
 	Invalidate(server string)
 }
 

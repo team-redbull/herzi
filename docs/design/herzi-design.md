@@ -219,7 +219,8 @@ A NodePool scales down; CAPI deletes the AgentMachine and unbinds its Agent.
        (CAPI never re-checks the selector after the pick, so the install is untouched)
 15:00  scale-down: clusterDeploymentName and agentMachineRef are cleared → the Agent is retiring, not supply
 15:00  gates hold → POST remove-server-from-mce {server_name: <bmh label>} → run Running
-15:03  the run powers the host off and deletes its BMH, NMStateConfig and Agent → the retirer forgets it
+15:03  the run deletes the NMStateConfig and BareMetalHost (metal3 deprovisions and powers it off; up to 15 min),
+       then the Agent → the retirer forgets it
 ```
 
 Every NodePool carries `matchExpressions: [{key: redbull.io/claimed, operator: DoesNotExist}]`, so no NodePool
@@ -566,7 +567,10 @@ case RetireCandidate:  // labelled, unbound, not deleting
     //   an Agent-platform NodePool selector still matches the Agent (CAPI could claim it): blocked "unguarded nodepool"
     //   no pollers on remove workflow, activity or segment queue: blocked "no workers"
     //   pool paused (config or annotation) paused
-    //   Describe(remove-server-from-mce-<server>) failed: waiting; Running (ours or not): removing
+    //   Describe of either id below failed: waiting
+    //   uninstall-server-from-hc-<server> Running: waiting "uninstall running" (it polls this Agent until it is a
+    //   clean free one; removing it first fails that run)
+    //   remove-server-from-mce-<server> Running (ours or not): removing
     //   closed less than removeRetryAfter ago: waiting "retry backoff"
     //   Running remove runs >= maxOpenRemovals: waiting "removal cap"
     if d.Server != "" {

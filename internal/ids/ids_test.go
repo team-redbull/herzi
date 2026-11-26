@@ -15,6 +15,8 @@ func TestPinnedToThePythonBuilders(t *testing.T) {
 		{RemoveServer("ocp-dell-x"), "remove-server-from-mce-ocp-dell-x"},
 		{RemoveServer("ocp-hp-gen11-nyc-64c-128gb-HP0001592"), "remove-server-from-mce-ocp-hp-gen11-nyc-64c-128gb-hp0001592"},
 		{RemoveWorkflow + "-workflow", "remove-server-from-mce-workflow"},
+		// shared/workflow_ids.py uninstall_server_from_hc_workflow_id: f"uninstall-server-from-hc-{server_name.lower()}"
+		{UninstallServer("ocp-hp-gen11-nyc-64c-128gb-HP0001592"), "uninstall-server-from-hc-ocp-hp-gen11-nyc-64c-128gb-hp0001592"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

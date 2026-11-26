@@ -22,9 +22,22 @@ import (
 type runsFake struct {
 	mu          sync.Mutex
 	runs        map[string]pipeline.RemoveRun
+	uninstalls  map[string]pipeline.RemoveRun
 	err         error
 	describes   int
 	invalidated []string
+}
+
+func (r *runsFake) DescribeUninstall(_ context.Context, server string) (pipeline.RemoveRun, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return pipeline.RemoveRun{}, r.err
+	}
+	if run, ok := r.uninstalls[server]; ok {
+		return run, nil
+	}
+	return pipeline.RemoveRun{Status: pipeline.StatusNotFound}, nil
 }
 
 func (r *runsFake) Describe(_ context.Context, server string) (pipeline.RemoveRun, error) {
@@ -181,6 +194,12 @@ func TestRetirerRemovesOnlyWhenSafe(t *testing.T) {
 		{name: "no remove worker", prepare: func(f *retireFixture) { f.queues.result.Remove = 0 }, state: pipeline.RetireBlocked},
 		{name: "paused by config", cfg: func(c *config.Config) { c.Pools["p"] = config.PoolOverride{Paused: new(true)} }, state: pipeline.RetirePaused},
 		{name: "describe failed", prepare: func(f *retireFixture) { f.runs.err = errors.New("temporal down") }, state: pipeline.RetireWaiting},
+		{name: "an uninstall still verifying the free Agent", prepare: func(f *retireFixture) {
+			f.runs.uninstalls = map[string]pipeline.RemoveRun{"srv-1": {Status: pipeline.StatusRunning}}
+		}, state: pipeline.RetireWaiting},
+		{name: "after the uninstall completed", prepare: func(f *retireFixture) {
+			f.runs.uninstalls = map[string]pipeline.RemoveRun{"srv-1": {Status: pipeline.StatusCompleted, Closed: f.now.Add(-time.Minute)}}
+		}, remove: true, state: pipeline.RetireRemoving},
 		{name: "already running elsewhere", prepare: func(f *retireFixture) {
 			f.runs.set("srv-1", pipeline.RemoveRun{Status: pipeline.StatusRunning})
 		}, state: pipeline.RetireRemoving},

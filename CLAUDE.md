@@ -104,7 +104,8 @@ Unit tests with the fake client passing does not mean envtest passes: run the en
   removals (`Would remove`), also default `true`.
 - The retirer labels a bound Agent whatever pause, ignore or dry run say (a missed label cannot be repaired). It removes a released one only
   when every gate holds: no `agentMachineRef`, a `agent-install.openshift.io/bmh` server name (never guessed), no Agent-platform NodePool
-  selector that still matches it, remove/activity/segment pollers, pool not paused, no open remove run and `removeRetryAfter` passed since
+  selector that still matches it, remove/activity/segment pollers, pool not paused, no open `uninstall-server-from-hc` run for the
+  server (it waits for this Agent to become a free one), no open remove run and `removeRetryAfter` passed since
   the last one, fewer than `maxOpenRemovals` open, and the same answer on an uncached read of the Agent.
 
 ## Working with Codex agents

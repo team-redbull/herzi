@@ -51,6 +51,28 @@ func TestRemoveRunsDescribesTheServerID(t *testing.T) {
 	require.EqualValues(t, 3, calls.Load(), "expired after the TTL")
 }
 
+func TestRemoveRunsDescribesTheUninstallIDSeparately(t *testing.T) {
+	var seen []string
+	fake := &fakeClient{describe: func(_ context.Context, id, _ string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
+		seen = append(seen, id)
+		if id == "uninstall-server-from-hc-srv" {
+			return execution(enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING, "u"), nil
+		}
+		return nil, serviceerror.NewNotFound("never ran")
+	}}
+	runs := NewRemoveRuns(Options{Client: fake})
+	uninstall, err := runs.DescribeUninstall(context.Background(), "SRV")
+	require.NoError(t, err)
+	require.Equal(t, pipeline.StatusRunning, uninstall.Status)
+	remove, err := runs.Describe(context.Background(), "srv")
+	require.NoError(t, err)
+	require.Equal(t, pipeline.StatusNotFound, remove.Status, "the two ids are cached apart")
+	runs.Invalidate("srv")
+	_, _ = runs.DescribeUninstall(context.Background(), "srv")
+	require.Equal(t, []string{"uninstall-server-from-hc-srv", "remove-server-from-mce-srv"}, seen,
+		"Invalidate drops only the remove id")
+}
+
 func TestRemoveRunsNotFoundAndErrors(t *testing.T) {
 	var fail atomic.Bool
 	var calls atomic.Int32

@@ -51,6 +51,7 @@ const (
 	WaitNoWorkers   = "no workers"
 	WaitPaused      = "pool paused"
 	WaitDescribe    = "describe failed"
+	WaitUninstall   = "uninstall running"
 	WaitRunning     = "removal running"
 	WaitBackoff     = "retry backoff"
 	WaitCap         = "removal cap"
@@ -75,6 +76,8 @@ type RemoveInput struct {
 	Pollers      PollerStatus
 	Run          RemoveRun
 	RunErr       error
+	Uninstall    RemoveRun // the server's uninstall-server-from-hc run
+	UninstallErr error
 	OpenRemovals int
 	OpenErr      error
 	MaxOpen      int
@@ -122,8 +125,12 @@ func DecideRemove(in RemoveInput) RemoveDecision {
 	if in.Paused {
 		return wait(RetirePaused, WaitPaused)
 	}
-	if in.RunErr != nil {
+	if in.RunErr != nil || in.UninstallErr != nil {
 		return wait(RetireWaiting, WaitDescribe)
+	}
+	// An uninstall waits for this very Agent to become a clean free one; removing it first fails that run.
+	if in.Uninstall.Status == StatusRunning {
+		return wait(RetireWaiting, WaitUninstall)
 	}
 	switch in.Run.Status {
 	case "", StatusNotFound:

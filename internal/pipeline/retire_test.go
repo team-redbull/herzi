@@ -92,6 +92,11 @@ func TestDecideRemoveGates(t *testing.T) {
 		{name: "install workflow worker is not needed", change: func(in *RemoveInput) { in.Pollers.Workflow = 0 }, state: RetireRemoving},
 		{name: "paused", change: func(in *RemoveInput) { in.Paused = true }, state: RetirePaused, reason: WaitPaused},
 		{name: "describe failed", change: func(in *RemoveInput) { in.RunErr = errors.New("x") }, state: RetireWaiting, reason: WaitDescribe},
+		{name: "uninstall describe failed", change: func(in *RemoveInput) { in.UninstallErr = errors.New("x") }, state: RetireWaiting, reason: WaitDescribe},
+		{name: "uninstall running", change: func(in *RemoveInput) { in.Uninstall = RemoveRun{Status: StatusRunning} }, state: RetireWaiting, reason: WaitUninstall},
+		{name: "uninstall failed does not hold removal", change: func(in *RemoveInput) {
+			in.Uninstall = RemoveRun{Status: StatusFailed, Closed: clockTime().Add(-time.Minute)}
+		}, state: RetireRemoving},
 		{name: "running, ours or not", change: func(in *RemoveInput) { in.Run = RemoveRun{Status: StatusRunning} }, state: RetireRemoving, reason: WaitRunning},
 		{name: "not found", change: func(in *RemoveInput) { in.Run = RemoveRun{Status: StatusNotFound} }, state: RetireRemoving},
 		{name: "recent failure backs off", change: func(in *RemoveInput) {

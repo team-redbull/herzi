@@ -28,3 +28,8 @@ const RemoveWorkflow = "remove-server-from-mce"
 
 // RemoveServer has no MCE in it; other workflows start the same id for their own removals.
 func RemoveServer(server string) string { return RemoveWorkflow + "-" + strings.ToLower(server) }
+
+// UninstallWorkflow takes a server out of its hosted cluster and leaves it a free Agent.
+const UninstallWorkflow = "uninstall-server-from-hc"
+
+func UninstallServer(server string) string { return UninstallWorkflow + "-" + strings.ToLower(server) }

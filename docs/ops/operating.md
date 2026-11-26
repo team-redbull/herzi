@@ -365,10 +365,13 @@ the same pod, keyed per Agent, covering every Agent in `agentNamespace`, ignored
    machines instead;
 3. asks `remove-server-from-mce` (`{server_name: <agent-install.openshift.io/bmh label>, mce_cluster, namespace}`) once
    every gate holds: no `agentMachineRef`, a bmh label, no Agent-platform NodePool selector still matching the Agent,
-   pollers on the remove workflow, activity and segment queues, pool not paused, no open remove run and
+   pollers on the remove workflow, activity and segment queues, pool not paused, no open `uninstall-server-from-hc`
+   run for the server (it waits for the Agent to become a clean free one first), no open remove run and
    `removeRetryAfter` since the last one, fewer than `maxOpenRemovals` open, and the same answer on an uncached read.
 
-The workflow powers the host off and deletes its BMH, NMStateConfig and Agent on this MCE only; server-scan may later
+The workflow deletes the NMStateConfig and BareMetalHost, waits up to 15 minutes for metal3 to deprovision it (metal3
+powers it off), then deletes the Agent, on this MCE only. A server released by `uninstall-server-from-hc` is
+removed once that run has finished, so the server does not stay in inventory as that workflow leaves it; server-scan may later
 hand the hardware to an install as a fresh Agent. Watch `herzi_retiring_agents{state}`, `herzi_oldest_retiring_seconds`
 and `herzi_removals_total{result}`; the alerts are `HerziRetireBlocked` and `HerziRetirementSlow`.
 
@@ -727,6 +730,10 @@ The design Part 3, F requires all of the following before enabling growth:
 - Whether any NodePool still uses Replace upgrades, and its surge; size minFree
   for the largest desired instant scale-up plus that surge.
 - Segment worker and install workflow queue names, and the hub activity queue.
+- Every InfraEnv herzi grows carries `spec.agentLabels` `redbull.io/flavor`, `redbull.io/size` and `redbull.io/site`,
+  each one lowercase word of letters and digits. Since workflows 2026-11-22 a pool draw (herzi's `count` request)
+  without them fails at once with `InfraEnvAgentLabelsError`; herzi sees an `other` failure, alerts
+  `HerziInstallFailing` and, after three, falls back to one probe every `probeInterval`.
 
 Also verify the discovery-image disk wipe runs before Agent registration, fails
 closed and covers every disk for both VM and bare-metal pools. Confirm all Agents

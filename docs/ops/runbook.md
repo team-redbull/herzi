@@ -292,5 +292,7 @@ herzi_retiring_agents
 herzi_removals_total
 ```
 
-Open the run `remove-server-from-mce-<server>` in Temporal. `HostPowerOffTimeoutError` means the BMC did not power the host off; `ServerStillPresentError` means something re-created the host; a Running run with repeated schedule-to-start timeouts means no worker on the MCE activity queue. herzi asks again `removeRetryAfter` after a run closes; a run completing with `found: false` while the Agent remains means the bmh label does not name this server.
+A retiring Agent also waits (reason `uninstall running`) while an `uninstall-server-from-hc-<server>` run is open, which can take about an hour with a slow drain.
+
+Open the run `remove-server-from-mce-<server>` in Temporal. `BmhDeletionTimeoutError` means metal3 did not let the deleted BareMetalHost go within 15 minutes (its message carries metal3's state; usually an unreachable BMC); `HostPowerOffTimeoutError` is the same for runs started before the workflows change of 2026-11-24; `ServerStillPresentError` means something re-created the host; a Running run with repeated schedule-to-start timeouts means no worker on the MCE activity queue. herzi asks again `removeRetryAfter` after a run closes; a run completing with `found: false` while the Agent remains means the bmh label does not name this server.
 
