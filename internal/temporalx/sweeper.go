@@ -120,37 +120,55 @@ func (s *Sweeper) sweep(ctx context.Context, pool pipeline.PoolKey) pipeline.Swe
 }
 
 func (s *Sweeper) describe(ctx context.Context, id string, slot int) (*pipeline.SlotRun, error) {
-	callCtx, cancel := context.WithTimeout(ctx, s.opts.PerCallTimeout)
-	response, err := s.opts.Client.DescribeWorkflowExecution(callCtx, id, "")
+	e, err := describeExecution(ctx, s.opts, id)
+	if err != nil {
+		return nil, fmt.Errorf("describe slot %s: %w", id, err)
+	}
+	if e == nil {
+		return nil, nil
+	}
+	run := &pipeline.SlotRun{Slot: slot, Status: e.status, RunID: e.runID, Started: e.started, Closed: e.closed}
+	if e.status == pipeline.StatusTimedOut {
+		run.FailType = pipeline.FailUnknown
+	}
+	if e.status == pipeline.StatusFailed {
+		run.FailType = s.failureType(ctx, runKey{id, e.runID})
+	}
+	return run, nil
+}
+
+type describedRun struct {
+	status, runID   string
+	started, closed time.Time
+}
+
+// describeExecution returns nil for an id that never ran; Describe without a run id is the latest run, strongly consistent.
+func describeExecution(ctx context.Context, o Options, id string) (*describedRun, error) {
+	callCtx, cancel := context.WithTimeout(ctx, o.PerCallTimeout)
+	response, err := o.Client.DescribeWorkflowExecution(callCtx, id, "")
 	cancel()
 	if IsNotFound(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("describe slot %s: %w", id, err)
+		return nil, err
 	}
 	info := response.GetWorkflowExecutionInfo()
 	if info == nil {
-		return nil, fmt.Errorf("describe slot %s: missing execution info", id)
+		return nil, errors.New("missing execution info")
 	}
 	status, err := runStatus(info.GetStatus())
 	if err != nil {
-		return nil, fmt.Errorf("describe slot %s: %w", id, err)
+		return nil, err
 	}
-	run := &pipeline.SlotRun{Slot: slot, Status: status, RunID: info.GetExecution().GetRunId()}
+	e := &describedRun{status: status, runID: info.GetExecution().GetRunId()}
 	if info.StartTime != nil {
-		run.Started = info.StartTime.AsTime()
+		e.started = info.StartTime.AsTime()
 	}
 	if status != pipeline.StatusRunning && info.CloseTime != nil {
-		run.Closed = info.CloseTime.AsTime()
+		e.closed = info.CloseTime.AsTime()
 	}
-	if status == pipeline.StatusTimedOut {
-		run.FailType = pipeline.FailUnknown
-	}
-	if status == pipeline.StatusFailed {
-		run.FailType = s.failureType(ctx, runKey{id, info.GetExecution().GetRunId()})
-	}
-	return run, nil
+	return e, nil
 }
 
 func runStatus(status enumspb.WorkflowExecutionStatus) (string, error) {

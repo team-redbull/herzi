@@ -141,3 +141,52 @@ tests:
         summary: Pool fast-pool has an install open beyond the configured stuck threshold
         description: Open runs remain counted as supply; inspect Temporal history and worker activity.
         runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#stuck-open-runs
+- name: Blocked retirement fires after thirty minutes; paused, dry-run and progressing states never do
+  interval: 1m
+  input_series:
+  - series: herzi_config_valid
+    values: 1x40
+  - series: herzi_retiring_agents{state="blocked"}
+    values: 0x5 2x35
+  - series: herzi_retiring_agents{state="paused"}
+    values: 9x40
+  - series: herzi_retiring_agents{state="dry_run"}
+    values: 9x40
+  - series: herzi_retiring_agents{state="removing"}
+    values: 9x40
+  alert_rule_test:
+  - eval_time: 35m
+    alertname: HerziRetireBlocked
+    exp_alerts: []
+  - eval_time: 36m
+    alertname: HerziRetireBlocked
+    exp_alerts:
+    - exp_labels:
+        state: blocked
+        severity: warning
+      exp_annotations:
+        summary: Used servers cannot be removed from the MCE
+        description: Released ever-installed Agents wait on something a person must fix (no bmh label, a NodePool
+          without the ever-installed exclusion, no workers, a rejected request); the controller log names each one.
+        runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#retire-blocked
+- name: Slow retirement fires only past two hours of age
+  interval: 1m
+  input_series:
+  - series: herzi_config_valid
+    values: 1x10
+  - series: herzi_oldest_retiring_seconds
+    values: 7200+60x10
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: HerziRetirementSlow
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: HerziRetirementSlow
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: A used server has waited over two hours to be removed from the MCE
+        description: A remove-server-from-mce run keeps failing or never finishes, or the removal cap is saturated;
+          inspect the remove runs in Temporal.
+        runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#retirement-slow

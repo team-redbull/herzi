@@ -165,7 +165,7 @@ Inspect pending workflow activities and all three worker queues. Repair the fail
 
 ## HerziQueueHasNoPollers
 
-One of the activity, workflow or segment queues has zero pollers. A queue error also blocks growth, but may surface through the blocked-pool alert instead.
+One of the activity, workflow, segment or remove queues has zero pollers. Growth needs activity, workflow and segment; removing used servers needs remove, activity and segment. A queue error also blocks growth, but may surface through the blocked-pool alert instead.
 
 Confirm with the common kubectl/log commands and these exact PromQL queries:
 
@@ -245,7 +245,7 @@ For migration errors, delete `lowPct` and `minBand` from defaults and every over
 
 ## HerziAssignedExceedsDemand
 
-Assigned Agents have exceeded active NodePool demand for three hours, suggesting orphaned bindings. This is an investigation signal, not proof. Free claimable/settling spare capacity alone does not fire this alert: the controller only adds servers and capacity is never reclaimed. Lowering demand or the buffer only stops additions. Even assigned 21 at demand 20 can still need one addition toward the default target 22.
+Assigned Agents have exceeded active NodePool demand for three hours, suggesting orphaned bindings. This is an investigation signal, not proof. Free claimable/settling spare capacity alone does not fire this alert: capacity is never reclaimed because of a surplus. Lowering demand or the buffer only stops additions. An orphan-bound Agent stays bound, so the retirer never removes it. Even assigned 21 at demand 20 can still need one addition toward the default target 22.
 
 Confirm with the common kubectl/log commands and these exact PromQL queries:
 
@@ -255,4 +255,42 @@ herzi_pool_assigned{pool="32-128-zone-1"} - on(pool) herzi_pool_demand{pool="32-
 ```
 
 Compare bound clusterDeploymentName references with active NodePools and hosted clusters. Investigate HyperShift release behavior, deleted/paused NodePools and upgrade surge. Repair bindings through the owning operator after confirming ownership. herzi cannot identify or correct orphan bindings automatically.
+
+<a id="retire-blocked"></a>
+
+## HerziRetireBlocked
+
+At least one released used server (an unbound Agent carrying `redbull.io/ever-installed`) has waited 30 minutes on something a person must fix. It is not supply, so its pool already ordered a replacement; the old machine just stays on the MCE. The controller log names each Agent (`A used server ...`, fields `agent`, `server`, `reason`, `nodePool`).
+
+```promql
+herzi_retiring_agents{state="blocked"}
+```
+
+```bash
+kubectl -n herzi-system logs deployment/herzi -c manager --since=1h | grep -E 'used server'
+kubectl -n inventory get agents.agent-install.openshift.io -l redbull.io/ever-installed -L agent-install.openshift.io/bmh,agentMachineRef
+```
+
+By `reason`:
+
+- `unguarded nodepool`: the named NodePool's `agentLabelSelector` still matches the Agent, so CAPI could claim it. Add `{key: redbull.io/ever-installed, operator: DoesNotExist}` to its `matchExpressions` (try a non-production NodePool first; on `upgradeType: Replace` a selector change may roll its nodes), or delete the NodePool if it is unused.
+- `no bmh label`: herzi will not guess a server name. Find the server from the Agent's BareMetalHost or inventory and run remove-server-from-mce for it by hand through the workflows UI or API; never use the Agent name, which is a UUID.
+- `held by an AgentMachine`: CAPI has not finished releasing it. Check the AgentMachine named by the `agentMachineRef` label; remove a stale label only after confirming HyperShift released the machine.
+- `no workers`: the remove workflow, activity or segment queue has no pollers; see [HerziQueueHasNoPollers](#no-pollers).
+- `rejected by the API`: the route refused the request (HTTP 4xx); the log carries the response body. herzi retries after `removeRetryAfter`.
+- `pool unknown` or `nodepools unknown`: an InfraEnv or NodePool could not be read or parsed; check RBAC and the object named in the log.
+
+<a id="retirement-slow"></a>
+
+## HerziRetirementSlow
+
+A used server has been waiting (`waiting` or `removing`) for over two hours. Either its remove-server-from-mce run keeps failing or never finishes, Temporal Describe keeps failing, or `maxOpenRemovals` runs are all stuck.
+
+```promql
+herzi_oldest_retiring_seconds
+herzi_retiring_agents
+herzi_removals_total
+```
+
+Open the run `remove-server-from-mce-<server>` in Temporal. `HostPowerOffTimeoutError` means the BMC did not power the host off; `ServerStillPresentError` means something re-created the host; a Running run with repeated schedule-to-start timeouts means no worker on the MCE activity queue. herzi asks again `removeRetryAfter` after a run closes; a run completing with `found: false` while the Agent remains means the bmh label does not name this server.
 

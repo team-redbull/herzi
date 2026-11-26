@@ -21,7 +21,7 @@ ServiceAccount creation is controlled separately by `serviceAccount.create` and 
 
 | API group | Resource | Verbs | Why |
 |---|---|---|---|
-| agent-install.openshift.io | agents | get, list, watch | supply (the Agent informer, plus the uncached recheck) |
+| agent-install.openshift.io | agents | get, list, watch, patch | supply (the Agent informer, plus the uncached recheck); patch writes only the `redbull.io/ever-installed` label on a bound Agent |
 | agent-install.openshift.io | infraenvs | get, list, watch, patch | the pools; patch writes only the `herzi.redbull.io/*` annotations (block marker, pause, durable state) |
 | hypershift.openshift.io | nodepools | get, list, watch | demand, across all tenant namespaces |
 
@@ -34,7 +34,9 @@ only when `rbac.metricsReader.subjects` is nonempty. Add the Prometheus ServiceA
 there; never grant anonymous access. Names derive from the release name.
 
 Config is a mounted file that herzi polls, so **no ConfigMap permission is needed**. No Agent approval,
-status, finalizer, delete, NodePool write or CRD permission exists.
+status, finalizer, delete, NodePool write or CRD permission exists. Removing a used server is a POST to the workflows
+`remove-server-from-mce` route; the workflow worker, not herzi, deletes the BareMetalHost, NMStateConfig and Agent.
+Kubernetes RBAC cannot restrict an Agent patch to one label key either.
 
 ## Known breadth
 
@@ -52,6 +54,7 @@ SA=system:serviceaccount:herzi-system:herzi
 kubectl auth can-i list agents.agent-install.openshift.io -n inventory --as=$SA
 kubectl auth can-i watch infraenvs.agent-install.openshift.io -n inventory --as=$SA
 kubectl auth can-i patch infraenvs.agent-install.openshift.io -n inventory --as=$SA
+kubectl auth can-i patch agents.agent-install.openshift.io -n inventory --as=$SA
 kubectl auth can-i list nodepools.hypershift.openshift.io --all-namespaces --as=$SA
 kubectl auth can-i create leases.coordination.k8s.io -n herzi-system --as=$SA
 kubectl auth can-i delete agents.agent-install.openshift.io -n inventory --as=$SA

@@ -33,6 +33,7 @@ type Options struct {
 	ActivityQueue    string
 	WorkflowQueue    string
 	SegmentQueue     string
+	RemoveQueue      string // the remove-server-from-mce workflow queue; empty skips it
 	// Observe receives a pool or queue name and must return promptly under concurrent calls.
 	Observe func(pool string, d time.Duration)
 	// Now must be concurrency-safe; it controls cache age, while RPC timing uses the real clock.

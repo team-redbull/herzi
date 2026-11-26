@@ -11,6 +11,10 @@ func TestPinnedToThePythonBuilders(t *testing.T) {
 		{Named("ocp4-mce-tlv-01", "ocp-dell-x"), "add-server-to-mce-ocp4-mce-tlv-01_ocp-dell-x"},
 		{Named("ocp4-mce-tlv-01", "ocp-hp-gen11-nyc-64c-128gb-HP0001592"), "add-server-to-mce-ocp4-mce-tlv-01_ocp-hp-gen11-nyc-64c-128gb-hp0001592"},
 		{PoolPrefix("ocp4-mce-tlv-01", "ie"), "add-server-to-mce-ocp4-mce-tlv-01_ie_"},
+		// shared/workflow_ids.py remove_server_from_mce_workflow_id: f"remove-server-from-mce-{server_name.lower()}"
+		{RemoveServer("ocp-dell-x"), "remove-server-from-mce-ocp-dell-x"},
+		{RemoveServer("ocp-hp-gen11-nyc-64c-128gb-HP0001592"), "remove-server-from-mce-ocp-hp-gen11-nyc-64c-128gb-hp0001592"},
+		{RemoveWorkflow + "-workflow", "remove-server-from-mce-workflow"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

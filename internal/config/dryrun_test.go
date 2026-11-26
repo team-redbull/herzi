@@ -59,3 +59,27 @@ func TestDryRunChanges(t *testing.T) {
 		t.Fatalf("only the default changed, the explicit pool stayed live: %v", got)
 	}
 }
+
+func TestRemoveDryRun(t *testing.T) {
+	dry := loadDry(t, "")
+	if def, differing := dry.RemoveDryRunSummary(); !def || len(differing) != 0 {
+		t.Fatalf("removal starts in dry run everywhere, got %v %v", def, differing)
+	}
+	excluded := loadDry(t, "pools:\n  gone: {exclude: true, dryRunRemove: false}\n")
+	if def, differing := excluded.RemoveDryRunSummary(); !def || !reflect.DeepEqual(differing, []string{"gone"}) {
+		t.Fatalf("an excluded pool may still remove for real, got %v %v", def, differing)
+	}
+	if got := config.DryRunChanges(dry, excluded); len(got) != 1 || got[0] != "pool gone: removal dry run turned OFF: it now REALLY removes used servers from the MCE" {
+		t.Fatalf("got %v", got)
+	}
+	live := loadDry(t, "defaults: {dryRunRemove: false}\n")
+	if got := config.DryRunChanges(dry, live); len(got) != 1 || got[0] != "default removal dry run turned OFF: pools without their own setting now REALLY remove used servers from the MCE" {
+		t.Fatalf("got %v", got)
+	}
+	if got := config.DryRunChanges(live, dry); len(got) != 1 || got[0] != `default removal dry run turned ON: pools without their own setting now only log "Would remove"` {
+		t.Fatalf("got %v", got)
+	}
+	if got := config.DryRunChanges(dry, loadDry(t, "defaults: {dryRunGrow: false, dryRunRemove: false}\n")); len(got) != 2 {
+		t.Fatalf("each setting reports its own change, got %v", got)
+	}
+}

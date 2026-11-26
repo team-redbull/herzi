@@ -30,6 +30,30 @@ type Installer interface {
 	Install(ctx context.Context, req InstallRequest) (InstallResult, error)
 }
 
+type RemoveRequest struct {
+	Agent  string
+	Server string
+}
+
+type RemoveResult struct {
+	HTTPCode       int
+	AlreadyRunning bool // 409: a run for this server is in flight, possibly not ours
+	WorkflowID     string
+	RunID          string
+	Duration       time.Duration
+}
+
+type Remover interface {
+	// Remove wraps ErrAmbiguous when a run may have started and ErrRejected when nothing did; it never retries.
+	Remove(ctx context.Context, req RemoveRequest) (RemoveResult, error)
+}
+
+// RemoveRuns describes a server's remove id; Invalidate discards what was observed before a removal request.
+type RemoveRuns interface {
+	Describe(ctx context.Context, server string) (RemoveRun, error)
+	Invalidate(server string)
+}
+
 // SweepInvalidator discards observations made before an order attempt.
 type SweepInvalidator interface{ Invalidate(pool PoolKey) }
 

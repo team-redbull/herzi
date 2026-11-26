@@ -64,7 +64,7 @@ func (r *Reconciler) allPools(ctx context.Context, _ client.Object) []reconcile.
 	for name := range r.snapshot().Pools {
 		if !known[name] {
 			r.Metrics.Warning("pool override matches no InfraEnv")
-			log.FromContext(ctx).Info("Pool override matches no InfraEnv; check the name", "pool", name)
+			log.FromContext(ctx).Info("Pool override matches no InfraEnv; check the name", keyPool, name)
 		}
 	}
 	return requests

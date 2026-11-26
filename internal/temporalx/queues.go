@@ -19,15 +19,20 @@ func NewQueues(o Options) *Queues { return &Queues{opts: o.defaults()} }
 // Pollers preserves successful queue counts on error; errors mean unknown, never zero.
 func (q *Queues) Pollers(ctx context.Context) pipeline.PollerStatus {
 	var result pipeline.PollerStatus
-	for _, queue := range []struct {
+	type queueRead struct {
 		name  string
 		kind  enumspb.TaskQueueType
 		count *int
-	}{
+	}
+	queues := []queueRead{
 		{q.opts.WorkflowQueue, enumspb.TASK_QUEUE_TYPE_WORKFLOW, &result.Workflow},
 		{q.opts.ActivityQueue, enumspb.TASK_QUEUE_TYPE_ACTIVITY, &result.Activity},
 		{q.opts.SegmentQueue, enumspb.TASK_QUEUE_TYPE_ACTIVITY, &result.Segment},
-	} {
+	}
+	if q.opts.RemoveQueue != "" {
+		queues = append(queues, queueRead{q.opts.RemoveQueue, enumspb.TASK_QUEUE_TYPE_WORKFLOW, &result.Remove})
+	}
+	for _, queue := range queues {
 		if err := ctx.Err(); err != nil {
 			result.Err = errors.Join(result.Err, err)
 			break

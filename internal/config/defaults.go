@@ -7,7 +7,7 @@ import (
 )
 
 func Defaults() PoolConfig {
-	return PoolConfig{HighPct: 10, MinFree: 2, DryRunGrow: true, MaxOpenRunsPerPool: 15,
+	return PoolConfig{HighPct: 10, MinFree: 2, DryRunGrow: true, DryRunRemove: true, MaxOpenRunsPerPool: 15,
 		ProbeInterval: 20 * time.Minute, DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour}
 }
 
@@ -17,16 +17,19 @@ const (
 	activityQueuePrefix         = "server-lifecycle-activity-"
 	DefaultTemporalNamespaceVal = "default"
 	DefaultIgnoreLabel          = "herzi.redbull.io/ignore"
+	DefaultRemoveWorkflowQueue  = ids.RemoveWorkflow + "-workflow"
 )
 
 func DefaultHub() HubConfig {
 	return HubConfig{Interval: time.Minute, ReconcileTimeout: time.Minute, AgentNamespace: "inventory",
 		MaxSlots: 100, AmbiguousWait: 5 * time.Minute, StuckAfter: 2 * time.Hour,
 		TemporalNamespace: DefaultTemporalNamespaceVal, WorkflowQueue: DefaultWorkflowQueue,
-		SegmentQueue: DefaultSegmentQueue, IgnoreLabel: DefaultIgnoreLabel}
+		SegmentQueue: DefaultSegmentQueue, IgnoreLabel: DefaultIgnoreLabel,
+		RemoveWorkflowQueue: DefaultRemoveWorkflowQueue, MaxOpenRemovals: 10, RemoveRetryAfter: 30 * time.Minute}
 }
 
 // Manages is true for every InfraEnv except one excluded under pools or carrying the ignore label.
+// It governs supply and growth only; the retirer covers every Agent.
 func (c Config) Manages(name string, labels map[string]string) bool {
 	if o := c.Pools[name].Exclude; o != nil && *o {
 		return false
@@ -62,6 +65,9 @@ func merge(p PoolConfig, o PoolOverride) PoolConfig {
 	}
 	if o.DryRunGrow != nil {
 		p.DryRunGrow = *o.DryRunGrow
+	}
+	if o.DryRunRemove != nil {
+		p.DryRunRemove = *o.DryRunRemove
 	}
 	if o.Paused != nil {
 		p.Paused = *o.Paused

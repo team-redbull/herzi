@@ -14,6 +14,11 @@ type HubConfig struct {
 	StuckAfter       time.Duration `json:"stuckAfter"`
 	IgnoreLabel      string        `json:"ignoreLabel"`
 
+	RemoveURL           string        `json:"removeURL"` // empty derives from installURL
+	RemoveWorkflowQueue string        `json:"removeWorkflowQueue"`
+	MaxOpenRemovals     int           `json:"maxOpenRemovals"`
+	RemoveRetryAfter    time.Duration `json:"removeRetryAfter"`
+
 	TemporalAddress   string `json:"temporalAddress"`
 	TemporalNamespace string `json:"temporalNamespace"`
 	ActivityQueue     string `json:"activityQueue"`
@@ -30,6 +35,7 @@ type PoolConfig struct {
 	FailureMemory      time.Duration `json:"failureMemory"`
 	SettlingMax        time.Duration `json:"settlingMax"`
 	DryRunGrow         bool          `json:"dryRunGrow"`
+	DryRunRemove       bool          `json:"dryRunRemove"`
 	Paused             bool          `json:"paused"`
 }
 
@@ -43,6 +49,7 @@ type PoolOverride struct {
 	FailureMemory      *time.Duration `json:"failureMemory,omitempty"`
 	SettlingMax        *time.Duration `json:"settlingMax,omitempty"`
 	DryRunGrow         *bool          `json:"dryRunGrow,omitempty"`
+	DryRunRemove       *bool          `json:"dryRunRemove,omitempty"`
 	Paused             *bool          `json:"paused,omitempty"`
 	Exclude            *bool          `json:"exclude,omitempty"`
 }

@@ -4,7 +4,7 @@ type: application
 version: 0.1.0
 appVersion: "0.1.0"
 kubeVersion: ">=1.27.0-0"
-description: Add-only inventory controller for MCE hub machine pools
+description: Inventory controller for MCE hub machine pools that adds spare servers and retires used ones
 home: https://github.com/team-redbull/herzi
 sources:
   - https://github.com/team-redbull/herzi

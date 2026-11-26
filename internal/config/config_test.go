@@ -98,6 +98,7 @@ func TestLoad(t *testing.T) {
 				hub.ActivityQueue = "activities"
 				hub.WorkflowQueue = "workflows"
 				hub.SegmentQueue = "segments"
+				hub.RemoveURL = "https://workflows.example.com/remove-server-from-mce"
 				if diff := cmp.Diff(hub, c.HubConfig); diff != "" {
 					t.Fatal(diff)
 				}
@@ -117,7 +118,7 @@ func TestLoad(t *testing.T) {
 
 func TestLoadDurationFields(t *testing.T) {
 	for _, path := range []struct{ prefix, field string }{
-		{"", "interval"}, {"", "reconcileTimeout"}, {"", "ambiguousWait"}, {"", "stuckAfter"},
+		{"", "interval"}, {"", "reconcileTimeout"}, {"", "ambiguousWait"}, {"", "stuckAfter"}, {"", "removeRetryAfter"},
 		{"defaults", "probeInterval"}, {"defaults", "drawGrace"}, {"defaults", "failureMemory"}, {"defaults", "settlingMax"},
 		{"pools:\n  test", "probeInterval"}, {"pools:\n  test", "drawGrace"}, {"pools:\n  test", "failureMemory"}, {"pools:\n  test", "settlingMax"},
 	} {
@@ -166,9 +167,10 @@ func TestGoldenSample(t *testing.T) {
 	hub.ActivityQueue = "server-lifecycle-activity-ocp4-bat-yam-01"
 	hub.WorkflowQueue = "add-server-to-mce-workflow"
 	hub.SegmentQueue = "segment-lifecycle-activity"
+	hub.RemoveURL = "https://workflows-api.example.com/workflows/server-lifecycle/remove-server-from-mce"
 	want := config.Config{HubConfig: hub, Defaults: config.PoolConfig{
 		HighPct: 30, MinFree: 2, MaxOpenRunsPerPool: 15, ProbeInterval: 20 * time.Minute,
-		DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour,
+		DrawGrace: 2 * time.Minute, FailureMemory: 6 * time.Hour, SettlingMax: time.Hour, DryRunRemove: true,
 	}, Pools: map[string]config.PoolOverride{
 		"32-128-zone-1": {MinFree: new(5), MaxOpenRunsPerPool: new(8)},
 		"16-64-zone-2":  {Paused: new(true)}, "8-32-zone-1": {HighPct: new(25), DryRunGrow: new(true)},
@@ -181,6 +183,7 @@ func TestGoldenSample(t *testing.T) {
 func TestMergeEveryField(t *testing.T) {
 	c, err := config.Load([]byte(minimal + `defaults:
   dryRunGrow: true
+  dryRunRemove: true
   paused: true
 pools:
   test:
@@ -192,6 +195,7 @@ pools:
     failureMemory: 1h
     settlingMax: 1m
     dryRunGrow: false
+    dryRunRemove: false
     paused: false
 `))
 	if err != nil {
@@ -292,6 +296,10 @@ func TestValidateHubRules(t *testing.T) {
 		{"MaxSlots", 0, 100}, {"MaxSlots", 101, 100},
 		{"AgentNamespace", "  ", "inventory"}, {"ActivityQueue", "", "activity"},
 		{"WorkflowQueue", "", "workflow"}, {"SegmentQueue", "", "segment"},
+		{"RemoveURL", "", "https://example.com/remove"}, {"RemoveURL", "ftp://example.com", "http://example.com"},
+		{"RemoveWorkflowQueue", " ", "remove"},
+		{"MaxOpenRemovals", 0, 1}, {"MaxOpenRemovals", 101, 100},
+		{"RemoveRetryAfter", time.Duration(0), time.Hour}, {"RemoveRetryAfter", time.Second, time.Minute},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s=%v", tt.field, tt.bad), func(t *testing.T) {
@@ -346,16 +354,44 @@ temporalNamespace: custom
 activityQueue: a
 workflowQueue: w
 segmentQueue: s
+removeURL: https://other.example.com/remove
+removeWorkflowQueue: r
+maxOpenRemovals: 3
+removeRetryAfter: 1h
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := config.HubConfig{MCEName: "ocp4-custom", InstallURL: "http://example.com/install", Interval: 3 * time.Minute,
 		ReconcileTimeout: 90 * time.Second, AgentNamespace: "custom", MaxSlots: 100, AmbiguousWait: 10 * time.Minute, StuckAfter: 3 * time.Hour,
-		TemporalAddress: "localhost:7233", TemporalNamespace: "custom", ActivityQueue: "a", WorkflowQueue: "w", SegmentQueue: "s", IgnoreLabel: config.DefaultIgnoreLabel}
+		TemporalAddress: "localhost:7233", TemporalNamespace: "custom", ActivityQueue: "a", WorkflowQueue: "w", SegmentQueue: "s", IgnoreLabel: config.DefaultIgnoreLabel,
+		RemoveURL: "https://other.example.com/remove", RemoveWorkflowQueue: "r", MaxOpenRemovals: 3, RemoveRetryAfter: time.Hour}
 	if diff := cmp.Diff(want, c.HubConfig); diff != "" {
 		t.Fatal(diff)
 	}
+}
+
+func TestRemoveURLDefaultsBesideTheInstallRoute(t *testing.T) {
+	for install, want := range map[string]string{
+		"https://w.example/workflows/server-lifecycle/add-server-to-mce": "https://w.example/workflows/server-lifecycle/remove-server-from-mce",
+		"https://w.example/add-server-to-mce?token=secret#x":             "https://w.example/remove-server-from-mce",
+		"http://w.example:8080":           "http://w.example:8080/remove-server-from-mce",
+		"https://user:pass@w.example/a/b": "https://w.example/a/remove-server-from-mce",
+	} {
+		c, err := config.Load([]byte(strings.Replace(minimal, "https://workflows.example.com/install", install, 1)))
+		if err != nil {
+			t.Fatal(install, err)
+		}
+		if c.RemoveURL != want {
+			t.Errorf("%s: got %q, want %q", install, c.RemoveURL, want)
+		}
+	}
+	c, err := config.Load([]byte(minimal + "removeURL: '  '\n"))
+	if err != nil || c.RemoveURL != "https://workflows.example.com/remove-server-from-mce" {
+		t.Fatalf("a blank removeURL derives too: %q %v", c.RemoveURL, err)
+	}
+	_, err = config.Load([]byte(strings.Replace(minimal, "https://workflows.example.com/install", "relative", 1)))
+	requireError(t, err, "installURL", "removeURL")
 }
 
 func TestRemovedPoolKeysRejected(t *testing.T) {

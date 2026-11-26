@@ -18,5 +18,5 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- if .Values.installer.tls.existingSecret -}}{{ .Values.installer.tls.existingSecret }}{{- else if .Values.installer.tls.caCert -}}{{ .Release.Name }}-install-ca{{- end -}}
 {{- end }}
 {{- define "herzi.startupChecksum" -}}
-{{- pick .Values.config "mceName" "agentNamespace" "installURL" "maxSlots" "stuckAfter" "temporalAddress" "temporalNamespace" "activityQueue" "workflowQueue" "segmentQueue" | toJson | sha256sum }}
+{{- pick .Values.config "mceName" "agentNamespace" "installURL" "maxSlots" "stuckAfter" "temporalAddress" "temporalNamespace" "activityQueue" "workflowQueue" "segmentQueue" "removeURL" "removeWorkflowQueue" | toJson | sha256sum }}
 {{- end }}

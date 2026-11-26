@@ -7,8 +7,10 @@ MCE hub it keeps each InfraEnv's pool of spare machines matched to HyperShift No
 
 ## Hard rules
 
-- **The controller only ADDS servers.** There is no removal, ceiling, shrink, cooldown, delete call or delete RBAC verb, and
-  there must never be one. `lowPct` and `minBand` were removed and are rejected by the config loader.
+- **Capacity is add-only; used servers are retired.** Target, supply and Hold never remove capacity: there is no ceiling,
+  shrink or cooldown, and `lowPct` and `minBand` stay rejected by the config loader. The one removal is retiring: an Agent
+  that was ever bound to a tenant cluster is labelled `redbull.io/ever-installed` and, once released, removed from the MCE
+  through the workflows `remove-server-from-mce` route. herzi holds no Kubernetes delete verb; the workflow worker deletes.
 - **Fail closed.** Unknown, errored or ambiguous observations block the pool; they are never counted as zero. An unknown
   failure never permits a full order.
 - **Never push, open a PR or change a remote** unless the user asks. Commit locally only when asked.
@@ -71,9 +73,11 @@ Unit tests with the fake client passing does not mean envtest passes: run the en
 ## Layout
 
 - `internal/pipeline`: PURE stages `Attribute -> Validate -> Decide -> Plan` plus durable-state merge; no I/O, no clock, no globals.
-- `internal/controller`: the reconciler, the three watches (all map to the InfraEnv key), the pre-POST block marker, metrics wiring.
+- `internal/controller`: the pool reconciler, its three watches (all map to the InfraEnv key), the pre-POST block marker,
+  metrics wiring; the retirer (`retirer.go`, keyed per Agent) that labels and removes used servers.
 - `internal/temporalx`: slot sweep via `DescribeWorkflowExecution` on fixed ids, failure types from the close event, queue pollers.
-- `internal/installer`: the single POST to the install route; unknown outcomes wrap `ErrAmbiguous`, 4xx wrap `ErrRejected`; never retries.
+- `internal/installer`: the single POST to the install route, and the `Remover` POST to the remove route (409 = already
+  running); unknown outcomes wrap `ErrAmbiguous`, 4xx wrap `ErrRejected`; never retries.
 - `internal/config`: strict loader (durations are strings), per-pool merge and validation, last-good store, file watcher.
 - `internal/ids`: workflow ids, pinned to the workflows repo (`shared/workflow_ids.py`): `add-server-to-mce-<mce>_<infraEnv>_<slot>`.
 - `internal/metrics`, `internal/kube`, `cmd/main.go`: Prometheus metrics, unstructured views, manager wiring.
@@ -83,7 +87,8 @@ Unit tests with the fake client passing does not mean envtest passes: run the en
 ## Behaviour that must not change without a design decision
 
 - target = demand + max(`minFree`, (`highPct` x demand + 50) / 100), integer half-up; defaults `highPct` 10 (cap 1000), `minFree` 2
-  (cap 100000). Supply = assigned + claimable + settling + open runs. `need <= 0` holds before any probe logic.
+  (cap 100000). Supply = assigned + claimable + settling + open runs. An unbound Agent carrying the `redbull.io/ever-installed`
+  key is `retiring` and never supply. `need <= 0` holds before any probe logic.
 - Order only against a sweep observed after the previous attempt; the sweeper cache is invalidated after every POST.
 - The block marker (`herzi.redbull.io/blocked-until`) is written BEFORE the POST with its own bounded context and cleared after a
   definite outcome; durable pool state lives in `herzi.redbull.io/state`; `herzi.redbull.io/paused` pauses a pool.
@@ -91,10 +96,16 @@ Unit tests with the fake client passing does not mean envtest passes: run the en
   that started after the last capacity failure and completed an `acquire_servers` activity.
 - Pool-scoped problems block only their pool; hub-scoped findings are warnings. `maxSlots` must be 100. Timing relations are
   validated (`failureMemory >= 2*probeInterval`, `interval <= probeInterval`, `settlingMax >= probeInterval`, `drawGrace < probeInterval`).
-- Every InfraEnv in `agentNamespace` is managed; `pools` holds overrides only. It is ignored (no reads, orders, metrics or requeue) when it
-  carries the `ignoreLabel` key (default `herzi.redbull.io/ignore`, any value) or has `pools.<name>.exclude: true` (never in `defaults`).
+- Every InfraEnv in `agentNamespace` is managed; `pools` holds overrides only. It is left out of supply and growth (no sweep, orders, pool
+  metrics or requeue) when it carries the `ignoreLabel` key (default `herzi.redbull.io/ignore`, any value) or has `pools.<name>.exclude: true`
+  (never in `defaults`). Its Agents are still labelled and retired.
 - `dryRunGrow` (config, per pool or in `defaults`) logs `Would install` and orders nothing. The code and chart DEFAULT is `true`, so every pool
-  starts in dry run. Going live is an explicit `dryRunGrow: false` per pool, one pool at a time.
+  starts in dry run. Going live is an explicit `dryRunGrow: false` per pool, one pool at a time. `dryRunRemove` works the same way for
+  removals (`Would remove`), also default `true`.
+- The retirer labels a bound Agent whatever pause, ignore or dry run say (a missed label cannot be repaired). It removes a released one only
+  when every gate holds: no `agentMachineRef`, a `agent-install.openshift.io/bmh` server name (never guessed), no Agent-platform NodePool
+  selector that still matches it, remove/activity/segment pollers, pool not paused, no open remove run and `removeRetryAfter` passed since
+  the last one, fewer than `maxOpenRemovals` open, and the same answer on an uncached read of the Agent.
 
 ## Working with Codex agents
 

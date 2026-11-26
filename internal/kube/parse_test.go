@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/yaml"
 )
 
@@ -80,7 +81,9 @@ func TestFixtures(t *testing.T) {
 			}
 			switch n.Name {
 			case "replicas":
-				if n.Replicas == nil || *n.Replicas != 4 || n.AutoScaling || n.PlatformType != "Agent" || !n.Selector.HasExpressions || n.Selector.MatchLabels[LabelInfraEnv] != "pool-a" {
+				if n.Replicas == nil || *n.Replicas != 4 || n.AutoScaling || n.PlatformType != "Agent" ||
+					!reflect.DeepEqual(n.Selector.Expressions, []Requirement{{Key: "extra", Operator: "Exists"}}) ||
+					n.Selector.MatchLabels[LabelInfraEnv] != "pool-a" {
 					t.Fatal(n)
 				}
 			case "deleting":
@@ -147,6 +150,9 @@ func TestMalformedFields(t *testing.T) {
 		{"status.conditions", []any{map[string]any{"status": false}}, 0}, {"status.conditions", []any{map[string]any{"lastTransitionTime": "invalid"}}, 0},
 		{"spec.replicas", int64(-10), 1}, {"spec.replicas", int64(math.MinInt32), 1}, {"spec.replicas", "4", 1}, {"spec.replicas", 1.5, 1}, {"spec.replicas", int64(math.MaxInt32) + 1, 1}, {"spec.replicas", float64(math.MaxInt32) + 1, 1}, {"spec.replicas", math.NaN(), 1},
 		{"spec.autoScaling", true, 1}, {"spec.platform.type", true, 1}, {"spec.platform.agent.agentLabelSelector.matchLabels", false, 1}, {"spec.platform.agent.agentLabelSelector.matchExpressions", false, 1}, {"spec.pausedUntil", true, 1},
+		{"spec.platform.agent.agentLabelSelector.matchExpressions", []any{false}, 1},
+		{"spec.platform.agent.agentLabelSelector.matchExpressions", []any{map[string]any{"key": true}}, 1},
+		{"spec.platform.agent.agentLabelSelector.matchExpressions", []any{map[string]any{"values": []any{1.0}}}, 1},
 	}
 	for i, tc := range cases {
 		t.Run(fmt.Sprintf("%d/%s", i, tc.path), func(t *testing.T) {
@@ -210,6 +216,42 @@ func TestParserBoundaries(t *testing.T) {
 		}
 	}
 }
+func TestSelectorMatchesAsCAPIDoes(t *testing.T) {
+	exclusion := Requirement{Key: LabelEverInstalled, Operator: "DoesNotExist"}
+	require := func(ok bool, what string) {
+		t.Helper()
+		if !ok {
+			t.Fatal(what)
+		}
+	}
+	require(exclusion.IsEverInstalledExclusion(), "the exclusion")
+	for _, r := range []Requirement{{Key: LabelEverInstalled, Operator: "Exists"}, {Key: "other", Operator: "DoesNotExist"},
+		{Key: LabelEverInstalled, Operator: "DoesNotExist", Values: []string{"true"}}} {
+		require(!r.IsEverInstalledExclusion(), r.Key+" "+r.Operator)
+	}
+	fresh := labels.Set{LabelInfraEnv: "a"}
+	used := labels.Set{LabelInfraEnv: "a", LabelEverInstalled: EverInstalledValue}
+	for _, tc := range []struct {
+		name        string
+		selector    Selector
+		fresh, used bool
+	}{
+		{"empty selects everything", Selector{}, true, true},
+		{"infraenv only", Selector{MatchLabels: map[string]string{LabelInfraEnv: "a"}}, true, true},
+		{"with the exclusion", Selector{MatchLabels: map[string]string{LabelInfraEnv: "a"}, Expressions: []Requirement{exclusion}}, true, false},
+		{"other pool", Selector{MatchLabels: map[string]string{LabelInfraEnv: "b"}}, false, false},
+	} {
+		s, err := tc.selector.LabelSelector()
+		require(err == nil, tc.name+": "+fmt.Sprint(err))
+		require(s.Matches(fresh) == tc.fresh && s.Matches(used) == tc.used, tc.name)
+	}
+	_, err := Selector{Expressions: []Requirement{{Key: "k", Operator: "In"}}}.LabelSelector()
+	require(err != nil, "an In requirement without values is invalid")
+	a := Agent{Labels: map[string]string{LabelEverInstalled: "", LabelAgentMachineRef: "", LabelBMH: "srv-1"}}
+	require(a.EverInstalled() && a.HeldByMachine() && a.ServerName() == "srv-1", "agent label helpers")
+	require(!(Agent{}).EverInstalled() && !(Agent{}).HeldByMachine() && (Agent{}).ServerName() == "", "empty agent")
+}
+
 func TestTransform(t *testing.T) {
 	transform := PartialTransform()
 	for _, file := range []string{"agents", "nodepools", "infraenvs"} {

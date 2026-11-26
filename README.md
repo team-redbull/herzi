@@ -15,6 +15,10 @@ Kubernetes data before ordering, and calls the workflows add-server-to-mce API i
 bounded batches. Missing hardware triggers a one-machine probe every 20 minutes;
 uncertain reads and missing workers block growth rather than guessing.
 
+A server that was installed on a tenant cluster never returns to the spare pool: herzi labels every Agent bound to a
+cluster `redbull.io/ever-installed`, stops counting it once it is released, and asks the workflows
+remove-server-from-mce API to take it off the MCE.
+
 herzi owns no CRD and watches the operators' InfraEnv, Agent and NodePool resources
 as unstructured objects. One elected controller works across pools with bounded
 parallelism. Configuration opts pools in, supports per-pool overrides and dry run,
@@ -22,15 +26,15 @@ and preserves the last good snapshot when an update cannot be parsed.
 
 ## Status
 
-**Permanently add-only:** herzi only adds servers. Capacity is never reclaimed;
-lowering demand or the buffer only stops additions. VM creation, orphan-binding
-detection and an idempotency key on the install route remain backlog items.
+**Add-only capacity, retired used servers:** herzi never removes capacity because of a surplus; lowering demand or the
+buffer only stops additions. Its one removal is retiring a released server that was ever bound to a tenant cluster
+(the retirer). VM creation, orphan-binding detection and an idempotency key on the install route remain backlog items.
 
 The controller, metrics, manager wiring, generated RBAC and Helm packaging are implemented.
 The repository provides unit tests, an envtest integration suite, chart assertions and
 promtool alert tests. A live hub rollout, Temporal and workflows connectivity, worker
 queues and admission still require the [real-hub checks](docs/ops/operating.md#to-verify-on-a-real-hub).
-Every pool starts in dry run: `dryRunGrow` defaults to `true`.
+Every pool starts in dry run: `dryRunGrow` and `dryRunRemove` both default to `true`.
 
 ## Architecture
 
@@ -46,6 +50,9 @@ Temporal Describe slots + queue pollers --+                 v
                                                           |
                                                           v
                                                    Temporal -> Agents
+
+Agents (bound) --> retirer: label redbull.io/ever-installed
+Agents (released, labelled) --> retirer gates --> workflows remove-server-from-mce
 
 Lease: one active controller     HTTPS metrics: Prometheus -> alerts -> runbook
 ```
@@ -91,8 +98,8 @@ Choose the target hub deliberately, with the external Agent, InfraEnv and NodePo
 CRDs already installed. Review [RBAC](docs/ops/rbac.md). Copy the example values,
 replace its illustrative endpoints, registry and canonical MCE name (`mceName`), and list pools only to override
 settings. Every InfraEnv is managed by default; label one with `herzi.redbull.io/ignore` (or set
-`pools.<name>.exclude: true`) to skip it. Leave `dryRunGrow` at its default `true` until you have read the
-`Would install` logs. For a private Temporal CA, paste the PEM into `temporal.tls.caCert`; the chart creates the Secret.
+`pools.<name>.exclude: true`) to leave it out of supply and growth (its used servers are still retired). Leave
+`dryRunGrow` and `dryRunRemove` at their default `true` until you have read the `Would install` and `Would remove` logs. For a private Temporal CA, paste the PEM into `temporal.tls.caCert`; the chart creates the Secret.
 
 ```bash
 cp hack/chart/example-values.yaml my-hub-values.yaml
@@ -149,10 +156,15 @@ shared contract. The sample uses illustrative values, not discovered endpoints.
 | failureMemory | 6h | Pool | Closed failure evidence window |
 | settlingMax | 60m | Pool | Unclaimable Agent settling allowance |
 | dryRunGrow | true | Pool | Log Would install without posting |
-| paused | false | Pool | Observe but never order |
+| dryRunRemove | true | Pool | Log Would remove instead of calling remove-server-from-mce; Agents with no pool use `defaults` |
+| paused | false | Pool | Observe but never order or remove (used servers are still labelled) |
 | defaults | Pool defaults above | Hub structure | Base for every InfraEnv |
-| pools | Empty; every InfraEnv uses the defaults | Hub structure | InfraEnv name to pool override mapping; `exclude: true` ignores that InfraEnv |
-| ignoreLabel | herzi.redbull.io/ignore | Hub | An InfraEnv carrying this label key (any value) is ignored with its NodePools; live reload |
+| pools | Empty; every InfraEnv uses the defaults | Hub structure | InfraEnv name to pool override mapping; `exclude: true` leaves that InfraEnv out of supply and growth |
+| ignoreLabel | herzi.redbull.io/ignore | Hub | An InfraEnv carrying this label key (any value) is left out of supply and growth with its NodePools; its used servers are still retired; live reload |
+| removeURL | installURL with its last path segment replaced by remove-server-from-mce | Hub | Full /workflows/server-lifecycle/remove-server-from-mce route; restart to change |
+| removeWorkflowQueue | remove-server-from-mce-workflow | Hub | Remove workflow queue; must have pollers before any removal; restart to change |
+| maxOpenRemovals | 10 | Hub | Hub-wide cap on running remove runs (1..100); live reload |
+| removeRetryAfter | 30m | Hub | Wait after a closed remove run (failed, or completed while the Agent remains) before asking again; at least interval; live reload |
 
 See the [chart values reference](docs/ops/operating.md#chart-values-reference) and
 the complete [example values](hack/chart/example-values.yaml), including all Temporal
@@ -215,8 +227,9 @@ need   = target - (assigned + claimable + settling + open)
 
 With valid observations and an unblocked pool, positive need enters Full/Probe growth.
 At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
-before considering failures or probes. Capacity is never reclaimed: lowering demand or
-the buffer only stops additions. Spare capacity can persist indefinitely.
+before considering failures or probes. Capacity is never reclaimed because of a surplus: lowering demand or
+the buffer only stops additions, and spare capacity can persist indefinitely. A released Agent labelled
+`redbull.io/ever-installed` is `retiring`, not supply, and is removed from the MCE by the retirer.
 
 With defaults `highPct: 10` and `minFree: 2`:
 
@@ -240,8 +253,8 @@ machines (target 23); now it has two (target 22), the floor. With integer half-u
 rounding, the floor decides the buffer through demand 24; the percentage takes over
 at demand 25: `(10*25+50)/100 = 3`. Set `highPct: 15` explicitly to retain the former
 target behavior. To raise the buffer, set an explicit `highPct: 30` or increase
-`minFree`. Because the controller never removes servers, a larger buffer adds
-permanent capacity. Capacity is never reclaimed.
+`minFree`. Because the controller never removes spare servers, a larger buffer adds
+permanent capacity.
 
 Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
 must be non-negative). Invalid defaults reject the document; invalid merged pool
@@ -296,7 +309,7 @@ preceding `herzi_pool_` prefix (for example `_assigned` means `herzi_pool_assign
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `herzi_pool_demand` / `_assigned` / `_claimable` / `_settling` / `_stuck_agents` / `_open_runs` | gauge | pool | the counted terms |
+| `herzi_pool_demand` / `_assigned` / `_claimable` / `_settling` / `_stuck_agents` / `_retiring` / `_open_runs` | gauge | pool | the counted terms (`_retiring` is never supply) |
 | `herzi_pool_target` / `_need` | gauge | pool | the formula outputs |
 | `herzi_pool_blocked` | gauge 0/1 | pool, reason | pool blocked this pass |
 | `herzi_pool_probe_mode` | gauge 0/1 | pool | hardware looks missing |
@@ -311,7 +324,11 @@ preceding `herzi_pool_` prefix (for example `_assigned` means `herzi_pool_assign
 | `herzi_sweep_duration_seconds` | histogram | — | per pool sweep |
 | `herzi_stuck_after_seconds` | gauge | none | Startup stuckAfter threshold in seconds; process constant |
 | `herzi_oldest_open_run_seconds` | gauge | pool | for the stuck-run alert |
-| `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`) | poller counts |
+| `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`,`remove`) | poller counts |
+| `herzi_retiring_agents` | gauge | state (`blocked`,`paused`,`dry_run`,`waiting`,`removing`) | released ever-installed Agents not yet removed, hub-wide |
+| `herzi_oldest_retiring_seconds` | gauge | — | age of the oldest `waiting` or `removing` Agent |
+| `herzi_agents_labelled_total` / `herzi_label_errors_total` | counter | — | ever-installed labels written / failed |
+| `herzi_removals_total` | counter | result (`started`,`already_running`,`ambiguous`,`rejected`,`dry_run`) | remove-server-from-mce requests |
 | `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, pool override matching no InfraEnv, ...) |
 | `herzi_config_valid` | gauge 0/1 | — | last config update accepted |
 | `herzi_last_successful_reconcile_timestamp_seconds` | gauge | pool | liveness of a pool |

@@ -45,8 +45,8 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 			msg = "not tied to an InfraEnv"
 		case !known:
 			msg = "unknown InfraEnv"
-		case len(np.Selector.MatchLabels) != 1 || np.Selector.HasExpressions:
-			f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": selector must be only the InfraEnv label"})
+		case len(np.Selector.MatchLabels) != 1 || !onlyExclusion(np.Selector.Expressions):
+			f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": selector must be only the InfraEnv label, optionally with the ever-installed exclusion"})
 		case np.Replicas == nil:
 			f.Problems = append(f.Problems, Problem{Pool: key, Msg: object + ": no replicas (autoscaling?)"})
 		default:
@@ -70,13 +70,14 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 			warnings = append(warnings, Warning{Object: a.Namespace + "/" + a.Name, Msg: "agent not in any pool"})
 			continue
 		}
-		_, held := a.Labels[kube.LabelAgentMachineRef]
 		switch {
 		case a.Bound:
 			f.Assigned++
 		case a.Deleting:
 			continue
-		case a.Approved && a.Connected && a.State == kube.StateKnownUnbound && !held:
+		case a.EverInstalled():
+			f.Retiring++
+		case a.Approved && a.Connected && a.State == kube.StateKnownUnbound && !a.HeldByMachine():
 			f.Claimable++
 		case raw.At.Sub(a.LastStateChange) < s.ForPool(string(key)).SettlingMax:
 			f.Settling++
@@ -118,3 +119,7 @@ func Attribute(raw RawSnapshot, s Settings) map[PoolKey]PoolFacts {
 }
 
 func hasInfraEnvLabel(labels map[string]string) bool { _, ok := labels[kube.LabelInfraEnv]; return ok }
+
+func onlyExclusion(expressions []kube.Requirement) bool {
+	return len(expressions) == 0 || (len(expressions) == 1 && expressions[0].IsEverInstalledExclusion())
+}

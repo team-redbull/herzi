@@ -40,14 +40,11 @@ func (c Config) validateDocument() error {
 		"mceName",
 		"must be non-empty and canonical (ocp4- prefix)")
 	check(len(validation.IsQualifiedName(c.IgnoreLabel)) == 0, "ignoreLabel", "must be a valid Kubernetes label key")
-	u, err := url.Parse(c.InstallURL)
-	check(err == nil &&
-		u != nil &&
-		u.Hostname() != "" &&
-		(u.Scheme == "http" ||
-			u.Scheme == "https"),
-		"installURL",
-		"must be an absolute http(s) URL")
+	for _, field := range []struct{ name, value string }{{"installURL", c.InstallURL}, {"removeURL", c.RemoveURL}} {
+		u, err := url.Parse(field.value)
+		check(err == nil && u != nil && u.Hostname() != "" && (u.Scheme == "http" || u.Scheme == "https"),
+			field.name, "must be an absolute http(s) URL")
+	}
 	for _, field := range []struct {
 		name  string
 		value time.Duration
@@ -60,10 +57,14 @@ func (c Config) validateDocument() error {
 			c.AmbiguousWait},
 		{"stuckAfter",
 			c.StuckAfter},
+		{"removeRetryAfter",
+			c.RemoveRetryAfter},
 	} {
 		check(field.value > 0, field.name, "must be > 0")
 	}
+	check(c.RemoveRetryAfter >= c.Interval, "removeRetryAfter", "must be >= interval")
 	check(c.MaxSlots == 100, "maxSlots", "must equal 100 because the install route allocates across exactly 100 slots")
+	check(c.MaxOpenRemovals >= 1 && c.MaxOpenRemovals <= 100, "maxOpenRemovals", "must be between 1 and 100")
 	for _, field := range []struct{ name, value string }{
 		{"agentNamespace",
 			c.AgentNamespace},
@@ -73,6 +74,8 @@ func (c Config) validateDocument() error {
 			c.WorkflowQueue},
 		{"segmentQueue",
 			c.SegmentQueue},
+		{"removeWorkflowQueue",
+			c.RemoveWorkflowQueue},
 	} {
 		check(strings.TrimSpace(field.value) != "", field.name, "must not be empty")
 	}

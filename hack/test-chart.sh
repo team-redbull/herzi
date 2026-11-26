@@ -106,12 +106,12 @@ for mode in ['example','monitoring']:
         assert monitor['endpoints']==[dict(path='/metrics',port='https',scheme='https',interval='30s',**supplied['serviceMonitor']['endpoint'])]
         for kind in ['ServiceMonitor','PrometheusRule']:assert get(docs,kind)['metadata']['labels']['release']=='prometheus'
 original=checksum(render())
-for extra in [{'config':{'pools':{'32-128-zone-1':{'minFree':6}}}},{'config':{'interval':'3m','reconcileTimeout':'50s','ambiguousWait':'6m','defaults':{'highPct':20}}}]:
+for extra in [{'config':{'pools':{'32-128-zone-1':{'minFree':6,'dryRunRemove':False}}}},{'config':{'interval':'3m','reconcileTimeout':'50s','ambiguousWait':'6m','maxOpenRemovals':3,'removeRetryAfter':'1h','defaults':{'highPct':20}}}]:
     assert checksum(render(extra=extra))==original,'live config caused a restart'
-for key,value in {'mceName':'ocp4-other','agentNamespace':'other','installURL':'https://other.invalid/install','stuckAfter':'3h','temporalAddress':'other:7233','temporalNamespace':'other','activityQueue':'other-a','workflowQueue':'other-w','segmentQueue':'other-s'}.items():
+for key,value in {'mceName':'ocp4-other','agentNamespace':'other','installURL':'https://other.invalid/install','stuckAfter':'3h','temporalAddress':'other:7233','temporalNamespace':'other','activityQueue':'other-a','workflowQueue':'other-w','segmentQueue':'other-s','removeURL':'https://other.invalid/remove','removeWorkflowQueue':'other-r'}.items():
     assert checksum(render(extra={'config':{key:value}}))!=original,key+' did not cause a restart'
 import hashlib
-startup={k:merged(base,example)['config'][k] for k in ['mceName','agentNamespace','installURL','maxSlots','stuckAfter','temporalAddress','temporalNamespace','activityQueue','workflowQueue','segmentQueue']}
+startup={k:merged(base,example)['config'][k] for k in ['mceName','agentNamespace','installURL','maxSlots','stuckAfter','temporalAddress','temporalNamespace','activityQueue','workflowQueue','segmentQueue','removeURL','removeWorkflowQueue']}
 assert original==hashlib.sha256(json.dumps(startup,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 docs=render(extra={'rbac':{'create':False},'serviceAccount':{'create':False,'name':'existing'},'metrics':{'enabled':False}})
 assert not any(d['kind'] in ['Role','RoleBinding','ClusterRole','ClusterRoleBinding','ServiceAccount','Service'] for d in docs)
@@ -131,6 +131,9 @@ for key in ['lowPct','minBand']:
     for value in [0,None]:
         for location in [{'defaults':{key:value}},{'pools':{'example':{key:value}}}]:invalid({'config':location},[key,'removed'])
 invalid({'config':{'maxSlots':50}},['maxSlots','100'])
+invalid({'config':{'maxOpenRemovals':0}},['maxOpenRemovals'])
+invalid({'config':{'removeURL':'ftp://x'}},['removeURL'])
+invalid({'config':{'defaults':{'dryRunRemove':'no'}}},['dryRunRemove'])
 invalid({'config':{'defaults':{'highPct':1001}}},['highPct'])
 invalid({'config':{'pools':{'example':{'minFree':100001}}}},['minFree'])
 invalid({'config':{'defaults':{'typo':1}}},['typo'])

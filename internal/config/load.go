@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/team-redbull/herzi/internal/ids"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -30,6 +32,7 @@ type poolInput struct {
 	FailureMemory      *durationText `yaml:"failureMemory"`
 	SettlingMax        *durationText `yaml:"settlingMax"`
 	DryRunGrow         *bool         `yaml:"dryRunGrow"`
+	DryRunRemove       *bool         `yaml:"dryRunRemove"`
 	Paused             *bool         `yaml:"paused"`
 	Exclude            *bool         `yaml:"exclude"`
 }
@@ -44,6 +47,10 @@ type configInput struct {
 	AmbiguousWait     *durationText        `yaml:"ambiguousWait"`
 	StuckAfter        *durationText        `yaml:"stuckAfter"`
 	IgnoreLabel       *string              `yaml:"ignoreLabel"`
+	RemoveURL         *string              `yaml:"removeURL"`
+	RemoveQueue       *string              `yaml:"removeWorkflowQueue"`
+	MaxOpenRemovals   *int                 `yaml:"maxOpenRemovals"`
+	RemoveRetryAfter  *durationText        `yaml:"removeRetryAfter"`
 	TemporalAddress   *string              `yaml:"temporalAddress"`
 	TemporalNamespace *string              `yaml:"temporalNamespace"`
 	ActivityQueue     *string              `yaml:"activityQueue"`
@@ -105,6 +112,14 @@ func Load(data []byte) (Config, error) {
 			c.StuckAfter = *d
 		}
 	}
+	if input.RemoveRetryAfter != nil {
+		d, err := parseDuration(input.RemoveRetryAfter, "removeRetryAfter")
+		if err != nil {
+			problems = append(problems, err)
+		} else {
+			c.RemoveRetryAfter = *d
+		}
+	}
 	c.applyPlainFields(input)
 	c.MCEName = strings.TrimSpace(c.MCEName)
 	if c.MCEName != "" && !strings.HasPrefix(c.MCEName, "ocp4-") {
@@ -112,6 +127,9 @@ func Load(data []byte) (Config, error) {
 	}
 	if c.ActivityQueue == "" && c.MCEName != "" {
 		c.ActivityQueue = activityQueuePrefix + c.MCEName
+	}
+	if strings.TrimSpace(c.RemoveURL) == "" {
+		c.RemoveURL = removeURLBeside(c.InstallURL)
 	}
 	if input.Defaults.Exclude != nil {
 		problems = append(problems, errors.New("defaults.exclude: not allowed, it would exclude every InfraEnv; set exclude under the pool or use the ignore label"))
@@ -152,6 +170,15 @@ func (c *HubConfig) applyPlainFields(input configInput) {
 	if input.IgnoreLabel != nil {
 		c.IgnoreLabel = strings.TrimSpace(*input.IgnoreLabel)
 	}
+	if input.RemoveURL != nil {
+		c.RemoveURL = *input.RemoveURL
+	}
+	if input.RemoveQueue != nil {
+		c.RemoveWorkflowQueue = *input.RemoveQueue
+	}
+	if input.MaxOpenRemovals != nil {
+		c.MaxOpenRemovals = *input.MaxOpenRemovals
+	}
 	if input.TemporalAddress != nil {
 		c.TemporalAddress = *input.TemporalAddress
 	}
@@ -167,6 +194,18 @@ func (c *HubConfig) applyPlainFields(input configInput) {
 	if input.SegmentQueue != nil {
 		c.SegmentQueue = *input.SegmentQueue
 	}
+}
+
+// removeURLBeside puts the remove route next to the install route: same scheme, host and path prefix.
+func removeURLBeside(install string) string {
+	u, err := url.Parse(strings.TrimSpace(install))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	dir := "/" + strings.TrimPrefix(u.Path, "/")
+	u.Path = dir[:strings.LastIndex(dir, "/")+1] + ids.RemoveWorkflow
+	u.RawPath, u.RawQuery, u.Fragment, u.User = "", "", "", nil
+	return u.String()
 }
 
 func parseDuration(raw *durationText, field string) (*time.Duration, error) {
@@ -189,6 +228,7 @@ func (p poolInput) convert(path string) (PoolOverride, error) {
 		MinFree:            p.MinFree,
 		MaxOpenRunsPerPool: p.MaxOpenRunsPerPool,
 		DryRunGrow:         p.DryRunGrow,
+		DryRunRemove:       p.DryRunRemove,
 		Paused:             p.Paused,
 		Exclude:            p.Exclude,
 	}

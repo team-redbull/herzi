@@ -5,11 +5,40 @@ import (
 	"slices"
 )
 
+// dryRunSetting phrases one dry-run flag; "pools ..." takes the plural verb and "it ..." the singular.
+type dryRunSetting struct {
+	merged                                   func(PoolConfig) bool
+	written                                  func(PoolOverride) *bool
+	name, poolsOn, poolsOff, poolOn, poolOff string
+}
+
+var (
+	growDryRun = dryRunSetting{
+		merged:  func(p PoolConfig) bool { return p.DryRunGrow },
+		written: func(o PoolOverride) *bool { return o.DryRunGrow },
+		name:    "dry run",
+		poolsOn: `only log "Would install"`, poolsOff: "place REAL install orders",
+		poolOn: `only logs "Would install"`, poolOff: "places REAL install orders",
+	}
+	removeDryRun = dryRunSetting{
+		merged:  func(p PoolConfig) bool { return p.DryRunRemove },
+		written: func(o PoolOverride) *bool { return o.DryRunRemove },
+		name:    "removal dry run",
+		poolsOn: `only log "Would remove"`, poolsOff: "REALLY remove used servers from the MCE",
+		poolOn: `only logs "Would remove"`, poolOff: "REALLY removes used servers from the MCE",
+	}
+)
+
 // DryRunSummary returns the default dry-run setting and, sorted, the pools whose own setting differs from it.
-func (c Config) DryRunSummary() (def bool, differing []string) {
-	def = c.Defaults.DryRunGrow
+func (c Config) DryRunSummary() (def bool, differing []string) { return c.summary(growDryRun) }
+
+// RemoveDryRunSummary is DryRunSummary for dryRunRemove.
+func (c Config) RemoveDryRunSummary() (def bool, differing []string) { return c.summary(removeDryRun) }
+
+func (c Config) summary(s dryRunSetting) (def bool, differing []string) {
+	def = s.merged(c.Defaults)
 	for name := range c.Pools {
-		if c.ForPool(name).DryRunGrow != def {
+		if s.merged(c.ForPool(name)) != def {
 			differing = append(differing, name)
 		}
 	}
@@ -20,13 +49,17 @@ func (c Config) DryRunSummary() (def bool, differing []string) {
 // DryRunChanges says in words how dry-run behaviour differs between two configurations. A pool without its own
 // setting follows the default, so it is covered by the default line.
 func DryRunChanges(prev, next Config) []string {
+	return append(dryRunChanges(prev, next, growDryRun), dryRunChanges(prev, next, removeDryRun)...)
+}
+
+func dryRunChanges(prev, next Config, s dryRunSetting) []string {
 	var changes []string
-	switch {
-	case prev.Defaults.DryRunGrow == next.Defaults.DryRunGrow:
-	case next.Defaults.DryRunGrow:
-		changes = append(changes, "default dry run turned ON: pools without their own setting now only log \"Would install\"")
+	switch before, after := s.merged(prev.Defaults), s.merged(next.Defaults); {
+	case before == after:
+	case after:
+		changes = append(changes, fmt.Sprintf("default %s turned ON: pools without their own setting now %s", s.name, s.poolsOn))
 	default:
-		changes = append(changes, "default dry run turned OFF: pools without their own setting now place REAL install orders")
+		changes = append(changes, fmt.Sprintf("default %s turned OFF: pools without their own setting now %s", s.name, s.poolsOff))
 	}
 	names := make([]string, 0, len(prev.Pools)+len(next.Pools))
 	for name := range prev.Pools {
@@ -39,18 +72,18 @@ func DryRunChanges(prev, next Config) []string {
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		if prev.Pools[name].DryRunGrow == nil && next.Pools[name].DryRunGrow == nil {
+		if s.written(prev.Pools[name]) == nil && s.written(next.Pools[name]) == nil {
 			continue
 		}
-		before, after := prev.ForPool(name).DryRunGrow, next.ForPool(name).DryRunGrow
+		before, after := s.merged(prev.ForPool(name)), s.merged(next.ForPool(name))
 		if before == after {
 			continue
 		}
-		state := "OFF: it now places REAL install orders"
+		state := "OFF: it now " + s.poolOff
 		if after {
-			state = "ON: it now only logs \"Would install\""
+			state = "ON: it now " + s.poolOn
 		}
-		changes = append(changes, fmt.Sprintf("pool %s: dry run turned %s", name, state))
+		changes = append(changes, fmt.Sprintf("pool %s: %s turned %s", name, s.name, state))
 	}
 	return changes
 }

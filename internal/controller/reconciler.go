@@ -15,6 +15,7 @@ import (
 	"github.com/team-redbull/herzi/internal/metrics"
 	"github.com/team-redbull/herzi/internal/pipeline"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -201,7 +202,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ct
 	r.blockedAt(ctx, req.Name, nil, now)
 	switch i := intent.(type) {
 	case pipeline.Hold:
-		log.FromContext(ctx).V(1).Info("Holding pool", "pool", req.Name, "reason", i.Reason)
+		log.FromContext(ctx).V(1).Info("Holding pool", keyPool, req.Name, "reason", i.Reason)
 	case pipeline.Grow:
 		result, wakeUntil, exists, retErr = r.grow(ctx, req, cfg, now, started, raw, i)
 		return result, retErr
@@ -290,13 +291,13 @@ func (r *Reconciler) recordOutcome(ctx context.Context,
 	err error,
 	cfg config.Config,
 	now time.Time) error {
-	result := "started"
+	result := outcomeStarted
 	r.recordInstall(ctx, key.Name, request, res, err, blockedUntil(now, cfg.AmbiguousWait))
 	switch {
 	case errors.Is(err, pipeline.ErrAmbiguous):
 		result = "ambiguous"
 	case errors.Is(err, pipeline.ErrRejected):
-		result = "rejected"
+		result = outcomeReject
 	case err != nil:
 		return fmt.Errorf("install pool %s: %w", key.Name, err)
 	case len(res.Started) < res.Requested:
@@ -309,7 +310,7 @@ func (r *Reconciler) recordOutcome(ctx context.Context,
 	}
 	if patchErr := r.patchAnnotations(ctx, key, annotations); patchErr != nil {
 		log.FromContext(ctx).Error(errors.New("annotation patch was rejected by the API server"),
-			"Failed to update InfraEnv marker", "pool", key.Name)
+			"Failed to update InfraEnv marker", keyPool, key.Name)
 		if err != nil {
 			return patchErr
 		}
@@ -325,6 +326,7 @@ func (r *Reconciler) snapshot() config.Config {
 	cfg.Interval, cfg.ReconcileTimeout = live.Interval, live.ReconcileTimeout
 	cfg.AmbiguousWait, cfg.StuckAfter = live.AmbiguousWait, live.StuckAfter
 	cfg.IgnoreLabel = live.IgnoreLabel
+	cfg.MaxOpenRemovals, cfg.RemoveRetryAfter = live.MaxOpenRemovals, live.RemoveRetryAfter
 	return cfg
 }
 
@@ -363,19 +365,24 @@ func (r *Reconciler) markAttempt(pool string, at time.Time) {
 }
 
 func (r *Reconciler) patchAnnotations(ctx context.Context, key types.NamespacedName, a map[string]any) error {
-	patchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": a}})
-	if err != nil {
-		return fmt.Errorf("encode annotation patch: %w", err)
-	}
-	ie := kube.NewUnstructured(kube.InfraEnvGVK)
-	ie.SetNamespace(key.Namespace)
-	ie.SetName(key.Name)
-	if err := r.Client.Patch(patchCtx, ie, client.RawPatch(types.MergePatchType, body)); err != nil {
+	if err := r.mergePatch(ctx, kube.InfraEnvGVK, key, map[string]any{"metadata": map[string]any{"annotations": a}}); err != nil {
 		return fmt.Errorf("patch InfraEnv annotations: %w", err)
 	}
 	return nil
+}
+
+// mergePatch uses its own bounded context so a canceled reconcile cannot drop a write it already decided on.
+func (r *Reconciler) mergePatch(ctx context.Context, gvk schema.GroupVersionKind, key types.NamespacedName, patch map[string]any) error {
+	patchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	body, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("encode patch: %w", err)
+	}
+	u := kube.NewUnstructured(gvk)
+	u.SetNamespace(key.Namespace)
+	u.SetName(key.Name)
+	return r.Client.Patch(patchCtx, u, client.RawPatch(types.MergePatchType, body))
 }
 func (r *Reconciler) persistState(ctx context.Context, key types.NamespacedName,
 	previous string, state pipeline.State, now time.Time, p config.PoolConfig) (pipeline.State, error) {
@@ -462,7 +469,7 @@ func (r *Reconciler) grow(ctx context.Context, req ctrl.Request, cfg config.Conf
 			return result, wakeUntil, exists, err
 		}
 		if pc.DryRunGrow {
-			log.FromContext(ctx).Info("Would install", "pool", req.Name, "request", request, "count", request.Count)
+			log.FromContext(ctx).Info("Would install", keyPool, req.Name, "request", request, "count", request.Count)
 			r.Metrics.Order(req.Name, g.Mode, "dry_run", 0)
 			continue
 		}

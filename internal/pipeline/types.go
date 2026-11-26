@@ -55,11 +55,12 @@ type SweepResult struct {
 	Err        error
 }
 
-// PollerStatus.Err means poller counts are unknown.
+// PollerStatus.Err means poller counts are unknown; Remove gates only removals, never growth.
 type PollerStatus struct {
 	Activity int
 	Workflow int
 	Segment  int
+	Remove   int
 	Err      error
 }
 
@@ -103,6 +104,7 @@ type PoolFacts struct {
 	Claimable   int
 	Settling    int
 	StuckAgents int
+	Retiring    int // labelled ever-installed and unbound; never supply
 
 	Open   []SlotRun
 	Closed []SlotRun

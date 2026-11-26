@@ -22,18 +22,27 @@ func TestCatalogueAndForget(t *testing.T) {
 	m.InstallResponse("p", 202, "", time.Second)
 	m.TemporalError("sweep", "deadline_exceeded")
 	m.SetConfigValid(true)
-	m.ObservePollers(pipeline.PollerStatus{Activity: 1, Workflow: 2, Segment: 3})
+	m.ObservePollers(pipeline.PollerStatus{Activity: 1, Workflow: 2, Segment: 3, Remove: 4})
 	m.ReconcileDuration(time.Second)
 	m.SweepDuration(time.Second)
 	m.Successful("p", now)
+	m.RetiringAgents(map[string]int{pipeline.RetireBlocked: 1}, time.Minute)
+	m.Labelled()
+	m.LabelError()
+	m.Removal("started")
 	expected := map[string]struct {
 		kind   string
 		labels []string
 	}{
-		"herzi_stuck_after_seconds": {"GAUGE", nil},
-		"herzi_pool_blocked":        {"GAUGE", []string{"pool", "reason"}}, "herzi_pool_failure_class": {"GAUGE", []string{"class", "pool"}}, "herzi_orders_total": {"COUNTER", []string{"mode", "pool", "result"}}, "herzi_machines_ordered_total": {"COUNTER", []string{"pool"}}, "herzi_warnings_total": {"COUNTER", []string{"kind"}}, "herzi_install_errors_total": {"COUNTER", []string{"kind", "pool"}}, "herzi_install_http_responses_total": {"COUNTER", []string{"code"}}, "herzi_temporal_errors_total": {"COUNTER", []string{"kind", "op"}}, "herzi_install_request_duration_seconds": {"HISTOGRAM", nil}, "herzi_pollers": {"GAUGE", []string{"queue"}}, "herzi_config_valid": {"GAUGE", nil}, "herzi_reconcile_duration_seconds": {"HISTOGRAM", nil}, "herzi_sweep_duration_seconds": {"HISTOGRAM", nil},
+		"herzi_stuck_after_seconds":     {"GAUGE", nil},
+		"herzi_retiring_agents":         {"GAUGE", []string{"state"}},
+		"herzi_oldest_retiring_seconds": {"GAUGE", nil},
+		"herzi_agents_labelled_total":   {"COUNTER", nil},
+		"herzi_label_errors_total":      {"COUNTER", nil},
+		"herzi_removals_total":          {"COUNTER", []string{"result"}},
+		"herzi_pool_blocked":            {"GAUGE", []string{"pool", "reason"}}, "herzi_pool_failure_class": {"GAUGE", []string{"class", "pool"}}, "herzi_orders_total": {"COUNTER", []string{"mode", "pool", "result"}}, "herzi_machines_ordered_total": {"COUNTER", []string{"pool"}}, "herzi_warnings_total": {"COUNTER", []string{"kind"}}, "herzi_install_errors_total": {"COUNTER", []string{"kind", "pool"}}, "herzi_install_http_responses_total": {"COUNTER", []string{"code"}}, "herzi_temporal_errors_total": {"COUNTER", []string{"kind", "op"}}, "herzi_install_request_duration_seconds": {"HISTOGRAM", nil}, "herzi_pollers": {"GAUGE", []string{"queue"}}, "herzi_config_valid": {"GAUGE", nil}, "herzi_reconcile_duration_seconds": {"HISTOGRAM", nil}, "herzi_sweep_duration_seconds": {"HISTOGRAM", nil},
 	}
-	for _, name := range []string{"demand", "assigned", "claimable", "settling", "stuck_agents", "open_runs", "target", "need", "probe_mode"} {
+	for _, name := range []string{"demand", "assigned", "claimable", "settling", "stuck_agents", "retiring", "open_runs", "target", "need", "probe_mode"} {
 		expected["herzi_pool_"+name] = struct {
 			kind   string
 			labels []string
@@ -83,6 +92,40 @@ func TestCatalogueAndForget(t *testing.T) {
 		}
 	}
 }
+func TestRetireMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := New(reg)
+	m.RetiringAgents(map[string]int{pipeline.RetireBlocked: 2, pipeline.RetireRemoving: 1}, time.Hour)
+	m.RetiringAgents(map[string]int{pipeline.RetireRemoving: 3}, time.Minute)
+	m.Removal("started")
+	m.Removal("dry_run")
+	m.Removal("unbounded text")
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	got := map[string]float64{}
+	for _, family := range families {
+		for _, sample := range family.Metric {
+			key := family.GetName()
+			for _, l := range sample.Label {
+				key += "/" + l.GetValue()
+			}
+			if sample.Gauge != nil {
+				got[key] = sample.Gauge.GetValue()
+			} else if sample.Counter != nil {
+				got[key] = sample.Counter.GetValue()
+			}
+		}
+	}
+	require.Equal(t, 0.0, got["herzi_retiring_agents/blocked"], "an emptied state drops to zero")
+	require.Equal(t, 0.0, got["herzi_retiring_agents/waiting"])
+	require.Equal(t, 3.0, got["herzi_retiring_agents/removing"])
+	require.Equal(t, 0.0, got["herzi_retiring_agents/dry_run"])
+	require.Equal(t, 60.0, got["herzi_oldest_retiring_seconds"])
+	require.Equal(t, 1.0, got["herzi_removals_total/started"])
+	require.Equal(t, 1.0, got["herzi_removals_total/dry_run"])
+	require.Equal(t, 1.0, got["herzi_removals_total/other"])
+}
+
 func TestProbeAndLatestFailure(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := New(reg)

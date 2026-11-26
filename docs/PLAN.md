@@ -7,9 +7,10 @@ flaws and edge cases) with [`design/inventory-controller-original.md`](design/in
 **The design document is the source of truth; if the code and the design disagree, fix one of them on purpose.**
 
 ## Scope of v1
-The controller permanently only adds servers. Capacity is never reclaimed: lowering demand or
-the buffer only stops additions. VM creation, orphan-binding detection and install-route
-idempotency remain backlog items.
+Capacity is add-only: the controller never removes servers because of a surplus, and lowering demand or
+the buffer only stops additions. Used servers are retired: an Agent that was ever bound to a tenant cluster is
+labelled `redbull.io/ever-installed` and, once released, removed from the MCE through `remove-server-from-mce`
+(design cases 16 and 17). VM creation, orphan-binding detection and install-route idempotency remain backlog items.
 
 ```text
 buffer = max(minFree, (highPct*demand + 50)/100)  # integer half-up rounding
@@ -19,8 +20,9 @@ need   = target - (assigned + claimable + settling + open)
 
 With valid observations and an unblocked pool, positive need enters Full/Probe growth.
 At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
-before considering failures or probes. Capacity is never reclaimed: lowering demand or
-the buffer only stops additions. Spare capacity can persist indefinitely.
+before considering failures or probes. Capacity is never reclaimed because of a surplus: lowering demand or
+the buffer only stops additions. Spare capacity can persist indefinitely. Released ever-installed Agents are
+`retiring`, never supply.
 
 With defaults `highPct: 10` and `minFree: 2`:
 
@@ -44,8 +46,8 @@ machines (target 23); now it has two (target 22), the floor. With integer half-u
 rounding, the floor decides the buffer through demand 24; the percentage takes over
 at demand 25: `(10*25+50)/100 = 3`. Set `highPct: 15` explicitly to retain the former
 target behavior. To raise the buffer, set an explicit `highPct: 30` or increase
-`minFree`. Because the controller never removes servers, a larger buffer adds
-permanent capacity. Capacity is never reclaimed.
+`minFree`. Because the controller never removes spare servers, a larger buffer adds
+permanent capacity.
 
 Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
 must be non-negative). Invalid defaults reject the document; invalid merged pool
@@ -140,7 +142,12 @@ Prefix `herzi_`. Labels: `pool` = InfraEnv name.
 | `herzi_sweep_duration_seconds` | histogram | — | per pool sweep |
 | `herzi_stuck_after_seconds` | gauge | none | startup-configured open-run alert threshold in seconds (process constant) |
 | `herzi_oldest_open_run_seconds` | gauge | pool | for the stuck-run alert |
-| `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`) | poller counts |
+| `herzi_pollers` | gauge | queue (`activity`,`workflow`,`segment`,`remove`) | poller counts |
+| `herzi_pool_retiring` | gauge | pool | released ever-installed Agents of a managed pool; never supply |
+| `herzi_retiring_agents` | gauge | state (`blocked`,`paused`,`dry_run`,`waiting`,`removing`) | released ever-installed Agents not yet removed, hub-wide |
+| `herzi_oldest_retiring_seconds` | gauge | — | age of the oldest `waiting` or `removing` Agent |
+| `herzi_agents_labelled_total` / `herzi_label_errors_total` | counter | — | ever-installed labels written / failed |
+| `herzi_removals_total` | counter | result (`started`,`already_running`,`ambiguous`,`rejected`,`dry_run`) | remove-server-from-mce requests |
 | `herzi_warnings_total` | counter | kind | hub-scoped findings (stray Agent, unattributable NodePool, pool override matching no InfraEnv, ...) |
 | `herzi_config_valid` | gauge 0/1 | — | last config update accepted |
 | `herzi_last_successful_reconcile_timestamp_seconds` | gauge | pool | liveness of a pool |

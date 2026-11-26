@@ -87,7 +87,8 @@ Required values are `image.repository`, `config.mceName`, `config.installURL` an
 `config.temporalAddress`. Replace the example endpoints and `config.activityQueue`
 (or leave the queue empty to derive it from mceName). Every InfraEnv in `agentNamespace` is managed by
 default; use `config.pools` only for per-InfraEnv overrides or `exclude: true`. `dryRunGrow` defaults to `true`, so every pool starts in dry run;
-a per-pool `dryRunGrow: false` takes that pool live.
+a per-pool `dryRunGrow: false` takes that pool live. `dryRunRemove` also defaults to `true`: used servers are labelled
+but only logged as `Would remove` until a pool sets `dryRunRemove: false` (see [Retiring used servers](#retiring-used-servers)).
 Provision any referenced Secrets separately in `herzi-system` before installation.
 Missing required values fail Helm validation early; a fresh install manages every InfraEnv, all in dry run.
 
@@ -226,18 +227,20 @@ Defaults and merged pools require `0 <= highPct <= 1000`, `0 <= minFree <= 10000
 `settlingMax >= probeInterval`, and `drawGrace < probeInterval`.
 Invalid merged pool settings remain published with `PoolErrors` and block only that
 pool with `reason="config_invalid"`; healthy changes, including pauses, still apply.
-A frozen snapshot serves each pass. There are exactly nine pool settings: `highPct`,
+The hub also requires `1 <= maxOpenRemovals <= 100`, `removeRetryAfter >= interval` and an absolute http(s) `removeURL`
+(derived from `installURL` when empty).
+A frozen snapshot serves each pass. There are exactly ten pool settings: `highPct`,
 `minFree`, `maxOpenRunsPerPool`, `probeInterval`, `drawGrace`, `failureMemory`,
-`settlingMax`, `dryRunGrow`, and `paused`.
+`settlingMax`, `dryRunGrow`, `dryRunRemove`, and `paused`.
 
 herzi polls the mounted file every ten seconds and requeues all pools when an accepted change
 appears; the directory mount avoids subPath so Kubernetes can refresh its contents (the kubelet
 needs up to about a minute). Check both the accepted-config metric and the logs after updating.
-Pool/default edits (including `dryRunGrow`), `ignoreLabel` and live timing (`interval`, `reconcileTimeout`, `ambiguousWait`)
-reload without a rollout. Among controller settings, only startup-bound values
-(`mceName`, `agentNamespace`, `installURL`, `maxSlots`, `stuckAfter`,
-`temporalAddress`, `temporalNamespace`, `activityQueue`, `workflowQueue`, `segmentQueue`)
-change `checksum/startup-config` and restart pods. Thus `helm upgrade` is safe for
+Pool/default edits (including `dryRunGrow` and `dryRunRemove`), `ignoreLabel`, `maxOpenRemovals`, `removeRetryAfter`
+and live timing (`interval`, `reconcileTimeout`, `ambiguousWait`) reload without a rollout. Among controller settings,
+only startup-bound values (`mceName`, `agentNamespace`, `installURL`, `maxSlots`, `stuckAfter`,
+`temporalAddress`, `temporalNamespace`, `activityQueue`, `workflowQueue`, `segmentQueue`, `removeURL`,
+`removeWorkflowQueue`) change `checksum/startup-config` and restart pods. Thus `helm upgrade` is safe for
 pool edits. Changes to image, Secret references or pod scheduling also change the
 pod template and cause a rollout.
 
@@ -253,8 +256,9 @@ helm upgrade herzi charts/herzi -n herzi-system -f my-hub-values.yaml --set imag
 kubectl -n herzi-system logs deployment/herzi -c manager --since=10m
 ```
 
-To stop herzi looking at an InfraEnv altogether (it is then not read, ordered for, measured or requeued, and its
-NodePools and Agents are not counted), label it, or exclude it in config:
+To leave an InfraEnv out of supply and growth (it is then not swept, ordered for, measured or requeued, and its
+NodePools and Agents are not counted), label it, or exclude it in config. Its used servers are still labelled and
+retired; pause it (below) or keep `dryRunRemove: true` for it to stop removals:
 
 ```bash
 kubectl -n inventory label infraenvs.agent-install.openshift.io legacy-zone-3 herzi.redbull.io/ignore=true
@@ -281,7 +285,8 @@ kubectl -n inventory annotate infraenvs.agent-install.openshift.io 32-128-zone-1
 ```
 
 Config `paused: true` also pauses a pool; removing the annotation does not override
-that setting. The controller still observes paused pools; ignored pools are not read at all. NodePool
+that setting. The controller still observes paused pools, and the retirer still labels their bound Agents but removes
+nothing; ignored pools are not swept or counted. NodePool
 `pausedUntil` and deletion exclude its demand. The InfraEnv annotation
 `herzi.redbull.io/blocked-until` is a controller-written RFC3339 UTC deadline,
 written BEFORE each POST as attempt time + ambiguousWait (default 5m). Failure to
@@ -320,8 +325,9 @@ need   = target - (assigned + claimable + settling + open)
 
 With valid observations and an unblocked pool, positive need enters Full/Probe growth.
 At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
-before considering failures or probes. Capacity is never reclaimed: lowering demand or
-the buffer only stops additions. Spare capacity can persist indefinitely.
+before considering failures or probes. Capacity is never reclaimed because of a surplus: lowering demand or
+the buffer only stops additions. Spare capacity can persist indefinitely. Released Agents labelled
+`redbull.io/ever-installed` are `retiring`, never supply ([Retiring used servers](#retiring-used-servers)).
 
 With defaults `highPct: 10` and `minFree: 2`:
 
@@ -345,8 +351,56 @@ machines (target 23); now it has two (target 22), the floor. With integer half-u
 rounding, the floor decides the buffer through demand 24; the percentage takes over
 at demand 25: `(10*25+50)/100 = 3`. Set `highPct: 15` explicitly to retain the former
 target behavior. To raise the buffer, set an explicit `highPct: 30` or increase
-`minFree`. Because the controller never removes servers, a larger buffer adds
-permanent capacity. Capacity is never reclaimed.
+`minFree`. Because the controller never removes spare servers, a larger buffer adds
+permanent capacity.
+
+## Retiring used servers
+
+A server that was installed on a tenant cluster never returns to the spare pool. The retirer (a second controller in
+the same pod, keyed per Agent, covering every Agent in `agentNamespace`, ignored and excluded pools included):
+
+1. labels a bound Agent `redbull.io/ever-installed: "true"` within seconds of the bind, whatever pause, ignore or
+   dry run say. CAPI never re-checks the selector after it picks an Agent, so the label cannot disturb an install;
+2. treats a released labelled Agent as `retiring`: it is never claimable, settling or stuck, so the pool orders fresh
+   machines instead;
+3. asks `remove-server-from-mce` (`{server_name: <agent-install.openshift.io/bmh label>, mce_cluster, namespace}`) once
+   every gate holds: no `agentMachineRef`, a bmh label, no Agent-platform NodePool selector still matching the Agent,
+   pollers on the remove workflow, activity and segment queues, pool not paused, no open remove run and
+   `removeRetryAfter` since the last one, fewer than `maxOpenRemovals` open, and the same answer on an uncached read.
+
+The workflow powers the host off and deletes its BMH, NMStateConfig and Agent on this MCE only; server-scan may later
+hand the hardware to an install as a fresh Agent. Watch `herzi_retiring_agents{state}`, `herzi_oldest_retiring_seconds`
+and `herzi_removals_total{result}`; the alerts are `HerziRetireBlocked` and `HerziRetirementSlow`.
+
+**Every NodePool must exclude the label**, or a released Agent could be claimed again while it is being removed:
+
+```yaml
+spec:
+  platform:
+    agent:
+      agentLabelSelector:
+        matchLabels:
+          infraenvs.agent-install.openshift.io: <infraEnv>
+        matchExpressions:
+        - key: redbull.io/ever-installed
+          operator: DoesNotExist
+```
+
+This is the only expression herzi accepts next to the InfraEnv label; any other still blocks the pool (`selector`).
+A NodePool whose selector still matches a retiring Agent blocks its removal (`blocked`, reason `unguarded nodepool`).
+
+**Roll out in this order:**
+
+1. Deploy. Every bound Agent is labelled on the first pass (no opt-out); retiring Agents leave supply at once, so
+   pools may order replacements (still gated by `dryRunGrow`).
+2. Add the expression to the NodePools. Try one non-production NodePool first: a changed `agentLabelSelector` may
+   change its AgentMachineTemplate, and on `upgradeType: Replace` that could roll every node. Then check that
+   `herzi_retiring_agents{state="blocked"}` falls to 0.
+3. Read the `Would remove a used server from the MCE` lines: the server is the bmh label, never a bound Agent.
+4. Set `dryRunRemove: false` for one pool, then the rest (or under `defaults`, which also covers Agents with no pool).
+
+Agents released before the first deploy carry no label and stay in the pool. Every `upgradeType: Replace` upgrade
+retires the whole NodePool's previous machines.
 
 Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
 must be non-negative). Invalid defaults reject the document; invalid merged pool

@@ -19,6 +19,10 @@ import (
 
 const (
 	keyQueue       = "queue"
+	keyPool        = "pool"
+	keyTook        = "took"
+	outcomeStarted = "started"
+	outcomeReject  = "rejected"
 	errorReminder  = 5 * time.Minute
 	statusInterval = 10 * time.Minute
 	detailLimit    = 600
@@ -70,7 +74,7 @@ func describeBlock(reason string, hub config.HubConfig) blockLog {
 		d.msg, d.hub = "No worker is polling the Temporal segment queue; ordering is blocked", true
 		d.fields = []any{keyQueue, hub.SegmentQueue}
 	case "selector":
-		d.msg = "A NodePool selector must be only the InfraEnv label; ordering is blocked"
+		d.msg = "A NodePool selector must be only the InfraEnv label, optionally with the ever-installed exclusion; ordering is blocked"
 	case "replicas":
 		d.msg = "A NodePool has no replicas (autoscaling?); ordering is blocked"
 	case "config_invalid":
@@ -128,7 +132,7 @@ func (r *Reconciler) blockedAt(ctx context.Context, pool string, reasons []strin
 	logger := log.FromContext(ctx)
 	if reason == "" {
 		if old != "" {
-			logger.Info("Pool is no longer blocked", "pool", pool, "was", old)
+			logger.Info("Pool is no longer blocked", keyPool, pool, "was", old)
 		}
 		return
 	}
@@ -159,7 +163,7 @@ func (r *Reconciler) logBlock(logger logr.Logger, pool string, d blockLog, now t
 	}
 	fields := []any{"reason", d.code}
 	if !d.hub {
-		fields = append(fields, "pool", pool)
+		fields = append(fields, keyPool, pool)
 	}
 	fields = append(fields, d.fields...)
 	if d.isError {
@@ -222,7 +226,7 @@ func (r *Reconciler) logStatus(ctx context.Context, f pipeline.PoolFacts, v pipe
 	if !due {
 		return
 	}
-	log.FromContext(ctx).Info("Pool status", "pool", name,
+	log.FromContext(ctx).Info("Pool status", keyPool, name,
 		"nodePools", nodePools, "demand", f.Demand,
 		"assigned", f.Assigned, "claimable", f.Claimable, "settling", f.Settling, "stuckAgents", f.StuckAgents,
 		"openRuns", len(f.Open), "oldestOpenRun", oldest.Round(time.Second).String(),
@@ -265,7 +269,7 @@ func (r *Reconciler) recordInstall(ctx context.Context, pool string, request pip
 	logger := log.FromContext(ctx)
 	took := res.Duration.Round(time.Millisecond).String()
 	if err != nil {
-		fields := []any{"pool", pool, "kind", kind, "count", request.Count, "took", took}
+		fields := []any{keyPool, pool, "kind", kind, "count", request.Count, keyTook, took}
 		if failure != nil {
 			fields = append(fields, "url", failure.URL, "detail", failure.Detail)
 			if failure.HTTP != 0 {
@@ -292,7 +296,7 @@ func (r *Reconciler) recordInstall(ctx context.Context, pool string, request pip
 		logger.Error(logged, msg, fields...)
 		return
 	}
-	fields := []any{"pool", pool, "requested", res.Requested, "started", res.Started, "httpStatus", res.HTTPCode, "took", took}
+	fields := []any{keyPool, pool, "requested", res.Requested, outcomeStarted, res.Started, "httpStatus", res.HTTPCode, keyTook, took}
 	if len(res.Busy) > 0 {
 		fields = append(fields, "alreadyRunning", res.Busy)
 	}

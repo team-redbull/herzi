@@ -23,7 +23,11 @@ config:
   maxSlots: 100 # Fixed at 100 API slots.
   ambiguousWait: 5m # Block after an unclear POST; live reload.
   stuckAfter: 2h # Open-run warning age; startup-bound.
-  ignoreLabel: herzi.redbull.io/ignore # An InfraEnv carrying this label key is ignored (and so are its NodePools); live reload.
+  ignoreLabel: herzi.redbull.io/ignore # An InfraEnv carrying this label key is left out of supply and growth (and so are its NodePools); its Agents are still retired; live reload.
+  removeURL: "" # Empty derives the remove-server-from-mce route beside installURL; startup-bound.
+  removeWorkflowQueue: remove-server-from-mce-workflow # Remove workflow worker queue; startup-bound.
+  maxOpenRemovals: 10 # Hub-wide cap on running remove-server-from-mce runs (1..100); live reload.
+  removeRetryAfter: 30m # Wait after a closed remove run before asking again (>= interval); live reload.
   temporalAddress: "" # Required Temporal host:port.
   temporalNamespace: default # Temporal namespace.
   activityQueue: "" # Empty derives server-lifecycle-activity-<canonical mceName>.
@@ -38,8 +42,9 @@ config:
     failureMemory: 6h # Remember failures; at least twice probeInterval.
     settlingMax: 60m # Unbound Agent age; at least probeInterval.
     dryRunGrow: true # Log intended orders instead of calling add-server-to-mce; set false per pool to go live.
-    paused: false # Suspend growth for this pool.
-  pools: {} # Optional per-InfraEnv overrides; every other InfraEnv uses the defaults. exclude: true ignores one.
+    dryRunRemove: true # Log "Would remove" instead of calling remove-server-from-mce for used servers; set false per pool to go live.
+    paused: false # Suspend growth and removal for this pool (used servers are still labelled).
+  pools: {} # Optional per-InfraEnv overrides; every other InfraEnv uses the defaults. exclude: true leaves one out of supply and growth.
 installer:
   tls:
     caCert: "" # PEM text of the CA that signed the install endpoint (config.installURL), trusted in addition to the system roots; the chart creates the Secret. Pod restarts when it changes.

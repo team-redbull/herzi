@@ -142,7 +142,26 @@ func ParseNodePool(u *unstructured.Unstructured, now time.Time) (NodePool, error
 	}
 	v.AutoScaling = r.objectAt("spec", "autoScaling") != nil
 	v.Selector.MatchLabels = r.stringMap("spec", "platform", "agent", "agentLabelSelector", "matchLabels")
-	v.Selector.HasExpressions = len(r.slice("spec", "platform", "agent", "agentLabelSelector", "matchExpressions")) > 0
+	for i, raw := range r.slice("spec", "platform", "agent", "agentLabelSelector", "matchExpressions") {
+		path := []string{fmt.Sprintf("spec.platform.agent.agentLabelSelector.matchExpressions[%d]", i)}
+		m, ok := raw.(map[string]any)
+		if !ok {
+			r.fail(path, fmt.Errorf("must be an object"))
+			continue
+		}
+		e := &reader{object: m}
+		req := Requirement{Key: e.str("key"), Operator: e.str("operator")}
+		for _, value := range e.slice("values") {
+			s, ok := value.(string)
+			if !ok {
+				e.fail([]string{"values"}, fmt.Errorf("must be strings"))
+				continue
+			}
+			req.Values = append(req.Values, s)
+		}
+		r.fail(path, e.err)
+		v.Selector.Expressions = append(v.Selector.Expressions, req)
+	}
 	paused := r.str("spec", "pausedUntil")
 	until, err := time.Parse(time.RFC3339, paused)
 	v.Paused = paused == "true" || (err == nil && until.After(now))

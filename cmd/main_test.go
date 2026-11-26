@@ -33,6 +33,7 @@ func TestStartupBoundChanged(t *testing.T) {
 	t.Run("live settings are not startup-bound", func(t *testing.T) {
 		c := base
 		c.Interval, c.ReconcileTimeout, c.AmbiguousWait = time.Hour, time.Hour, time.Hour
+		c.MaxOpenRemovals, c.RemoveRetryAfter = 1, time.Hour
 		if got := startupBoundChanged(base, c); len(got) != 0 {
 			t.Fatalf("timing settings apply live, got %v", got)
 		}
@@ -43,8 +44,9 @@ func TestStartupBoundChanged(t *testing.T) {
 		c.StuckAfter = time.Hour
 		c.TemporalAddress, c.TemporalNamespace = "t2:7233", "ns"
 		c.ActivityQueue, c.WorkflowQueue, c.SegmentQueue = "a", "b", "c"
+		c.RemoveURL, c.RemoveWorkflowQueue = "https://w/remove", "r"
 		want := []string{"mceName", "agentNamespace", "installURL", "maxSlots", "stuckAfter", "temporalAddress",
-			"temporalNamespace", "activityQueue", "workflowQueue", "segmentQueue"}
+			"temporalNamespace", "activityQueue", "workflowQueue", "segmentQueue", "removeURL", "removeWorkflowQueue"}
 		if got := startupBoundChanged(base, c); !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %v, want %v", got, want)
 		}
@@ -277,8 +279,9 @@ func TestDryRunIsLoggedAtStartupAndWhenItChanges(t *testing.T) {
 	require.NoError(t, err)
 	var startup []string
 	logDryRun(logr.New(logCapture{entries: &startup}), initial)
-	require.Len(t, startup, 1)
+	require.Len(t, startup, 2)
 	require.Contains(t, startup[0], "Dry run is ON by default")
+	require.Contains(t, startup[1], "Removal dry run is ON by default")
 
 	store := config.NewStore(initial)
 	reload := make(chan event.GenericEvent, 4)
@@ -300,4 +303,10 @@ func TestDryRunIsLoggedAtStartupAndWhenItChanges(t *testing.T) {
 	require.NoError(t, store.Update([]byte(strings.Replace(validConfig, "pools: {p: {}}", "pools: {p: {dryRunGrow: true}}", 1)+"defaults: {dryRunGrow: false}\n")))
 	callback(nil)
 	require.Contains(t, strings.Join(entries, "\n"), "pool p: dry run turned ON")
+
+	require.NoError(t, store.Update([]byte(strings.Replace(validConfig, "pools: {p: {}}", "pools: {p: {dryRunGrow: true, dryRunRemove: false}}", 1)+"defaults: {dryRunGrow: false}\n")))
+	callback(nil)
+	joined = strings.Join(entries, "\n")
+	require.Contains(t, joined, "pool p: removal dry run turned OFF: it now REALLY removes used servers from the MCE")
+	require.Contains(t, joined, "poolsRemovingForReal [p]")
 }

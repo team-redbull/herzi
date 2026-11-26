@@ -69,8 +69,9 @@ groups:
       severity: critical
     annotations:
       summary: No pollers on {{ $labels.queue }} queue
-      description: Growth is blocked because a required worker queue has no pollers;
-        detection can lag worker death by about five minutes.
+      description: Growth (activity, workflow, segment) or removal of used servers (remove, activity, segment)
+        is blocked because a required worker queue has no pollers; detection can lag worker death by about
+        five minutes.
       runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#no-pollers
   - alert: HerziNotReconciling
     expr: time() - herzi_last_successful_reconcile_timestamp_seconds > 600
@@ -102,3 +103,23 @@ groups:
       description: Agents may remain bound after a NodePool is paused/deleted; verify
         ownership before repairing HyperShift state.
       runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#assigned-exceeds-demand
+  - alert: HerziRetireBlocked
+    expr: herzi_retiring_agents{state="blocked"} > 0
+    for: 30m
+    labels:
+      severity: warning
+    annotations:
+      summary: Used servers cannot be removed from the MCE
+      description: Released ever-installed Agents wait on something a person must fix (no bmh label, a NodePool
+        without the ever-installed exclusion, no workers, a rejected request); the controller log names each one.
+      runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#retire-blocked
+  - alert: HerziRetirementSlow
+    expr: herzi_oldest_retiring_seconds > 7200
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: A used server has waited over two hours to be removed from the MCE
+      description: A remove-server-from-mce run keeps failing or never finishes, or the removal cap is
+        saturated; inspect the remove runs in Temporal.
+      runbook_url: https://github.com/team-redbull/herzi/blob/main/docs/ops/runbook.md#retirement-slow

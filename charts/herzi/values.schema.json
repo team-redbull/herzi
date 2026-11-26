@@ -172,6 +172,9 @@
             "dryRunGrow": {
               "type": "boolean"
             },
+            "dryRunRemove": {
+              "type": "boolean"
+            },
             "paused": {
               "type": "boolean"
             },
@@ -243,6 +246,9 @@
               "dryRunGrow": {
                 "type": "boolean"
               },
+              "dryRunRemove": {
+                "type": "boolean"
+              },
               "paused": {
                 "type": "boolean"
               },
@@ -283,6 +289,24 @@
           "type": "string",
           "minLength": 1,
           "pattern": "\\S"
+        },
+        "removeURL": {
+          "type": "string",
+          "pattern": "^(\\s*|https?://[^/\\s]+.*)$"
+        },
+        "removeWorkflowQueue": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "maxOpenRemovals": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "removeRetryAfter": {
+          "type": "string",
+          "pattern": "^\\+?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+$"
         }
       },
       "additionalProperties": false,

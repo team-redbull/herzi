@@ -64,11 +64,23 @@ func TestAttributeNodePoolRules(t *testing.T) {
 		{name: "other label only", change: func(n *kube.NodePool) { n.Selector.MatchLabels = map[string]string{"other": "a"} }, warning: "not tied to an InfraEnv"},
 		{name: "unknown before complex selector", change: func(n *kube.NodePool) {
 			n.Selector.MatchLabels[kube.LabelInfraEnv] = "unknown"
-			n.Selector.HasExpressions = true
+			n.Selector.Expressions = []kube.Requirement{{Key: "other", Operator: "Exists"}}
 		}, warning: "unknown InfraEnv"},
 		{name: "empty label value", change: func(n *kube.NodePool) { n.Selector.MatchLabels[kube.LabelInfraEnv] = "" }, warning: "unknown InfraEnv"},
 		{name: "extra label", change: func(n *kube.NodePool) { n.Selector.MatchLabels["other"] = "x" }, problem: true},
-		{name: "expressions", change: func(n *kube.NodePool) { n.Selector.HasExpressions = true }, problem: true},
+		{name: "expressions", change: func(n *kube.NodePool) {
+			n.Selector.Expressions = []kube.Requirement{{Key: "other", Operator: "Exists"}}
+		}, problem: true},
+		{name: "ever-installed exclusion allowed", change: func(n *kube.NodePool) { n.Selector.Expressions = []kube.Requirement{exclusion()} }, demand: 3},
+		{name: "exclusion plus another expression", change: func(n *kube.NodePool) {
+			n.Selector.Expressions = []kube.Requirement{exclusion(), {Key: "other", Operator: "Exists"}}
+		}, problem: true},
+		{name: "exclusion with values", change: func(n *kube.NodePool) {
+			n.Selector.Expressions = []kube.Requirement{{Key: kube.LabelEverInstalled, Operator: "DoesNotExist", Values: []string{"true"}}}
+		}, problem: true},
+		{name: "ever-installed with another operator", change: func(n *kube.NodePool) {
+			n.Selector.Expressions = []kube.Requirement{{Key: kube.LabelEverInstalled, Operator: "NotIn", Values: []string{"true"}}}
+		}, problem: true},
 		{name: "nil replicas", change: func(n *kube.NodePool) { n.Replicas = nil; n.AutoScaling = true }, problem: true},
 		{name: "zero replicas", change: func(n *kube.NodePool) { v := int32(0); n.Replicas = &v }},
 		{name: "autoscaling flag with replicas", change: func(n *kube.NodePool) { n.AutoScaling = true }, demand: 3},
@@ -100,11 +112,24 @@ func TestAttributeNodePoolRules(t *testing.T) {
 
 func TestAttributeAgentRules(t *testing.T) {
 	for _, tt := range []struct {
-		name                                 string
-		change                               func(*kube.Agent)
-		assigned, claimable, settling, stuck int
-		warn                                 bool
+		name                                           string
+		change                                         func(*kube.Agent)
+		assigned, claimable, settling, stuck, retiring int
+		warn                                           bool
 	}{
+		{name: "labelled bound stays assigned", change: func(a *kube.Agent) { a.Bound = true; a.Labels[kube.LabelEverInstalled] = "true" }, assigned: 1},
+		{name: "labelled unbound is retiring, not claimable", change: func(a *kube.Agent) { a.Labels[kube.LabelEverInstalled] = "true" }, retiring: 1},
+		{name: "any label value retires", change: func(a *kube.Agent) { a.Labels[kube.LabelEverInstalled] = "" }, retiring: 1},
+		{name: "labelled rebooting is retiring, not settling", change: func(a *kube.Agent) {
+			a.Labels[kube.LabelEverInstalled] = "true"
+			a.Approved = false
+		}, retiring: 1},
+		{name: "labelled old is retiring, not stuck", change: func(a *kube.Agent) {
+			a.Labels[kube.LabelEverInstalled] = "true"
+			a.Approved = false
+			a.LastStateChange = clockTime().Add(-2 * time.Hour)
+		}, retiring: 1},
+		{name: "labelled deleting is ignored", change: func(a *kube.Agent) { a.Labels[kube.LabelEverInstalled] = "true"; a.Deleting = true }},
 		{name: "claimable", change: func(*kube.Agent) {}, claimable: 1},
 		{name: "bound before deleting", change: func(a *kube.Agent) { a.Bound = true; a.Deleting = true }, assigned: 1},
 		{name: "deleting", change: func(a *kube.Agent) { a.Deleting = true }},
@@ -130,7 +155,7 @@ func TestAttributeAgentRules(t *testing.T) {
 			raw.Agents = []kube.Agent{a}
 			all := Attribute(raw, settings{poolConfig()})
 			f := all["a"]
-			equal(t, []int{f.Assigned, f.Claimable, f.Settling, f.StuckAgents}, []int{tt.assigned, tt.claimable, tt.settling, tt.stuck})
+			equal(t, []int{f.Assigned, f.Claimable, f.Settling, f.StuckAgents, f.Retiring}, []int{tt.assigned, tt.claimable, tt.settling, tt.stuck, tt.retiring})
 			equal(t, len(f.Warnings) > 0, tt.warn)
 			equal(t, Validate(all["b"], raw, poolConfig()).Blocked, false)
 		})

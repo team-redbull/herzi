@@ -8,3 +8,5 @@ These are implementation decisions moved out of the code.
 - New: An omitted timeout defaults to 30 seconds, below the default reconcile deadline; unreleased builds identify themselves as herzi/dev in the User-Agent.
 - Install: Ignore body-close errors after reading the response because they cannot change the reported outcome.
 - parseReport: Decode complete items independently to retain earlier slot reports when a body is interrupted; accept unknown fields such as workflow_id for response compatibility.
+- Remover: Wraps an Installer built from the same options with the remove route URL, so it inherits the fresh-connection transport, redirect refusal, CA file, redaction and transport-error classification. Errors are pipeline.InstallError so logs and metrics share one shape.
+- Remover.Remove: A 409 means a run under the server's id is in flight (possibly another workflow's rollback child) and is reported as AlreadyRunning, not an error. A 202 whose workflow_id differs from ids.RemoveServer is ambiguous: herzi describes runs by that id, so a mismatch means the builder no longer matches the route.

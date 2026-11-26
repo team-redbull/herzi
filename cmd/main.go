@@ -93,6 +93,8 @@ func startupBoundChanged(old, current config.HubConfig) []string {
 	add("activityQueue", old.ActivityQueue != current.ActivityQueue)
 	add("workflowQueue", old.WorkflowQueue != current.WorkflowQueue)
 	add("segmentQueue", old.SegmentQueue != current.SegmentQueue)
+	add("removeURL", old.RemoveURL != current.RemoveURL)
+	add("removeWorkflowQueue", old.RemoveWorkflowQueue != current.RemoveWorkflowQueue)
 	return changed
 }
 
@@ -161,6 +163,7 @@ func run(args []string) int {
 	queues := temporalx.NewQueues(temporalx.Options{
 		Client:        tc,
 		ActivityQueue: hub.ActivityQueue, WorkflowQueue: hub.WorkflowQueue, SegmentQueue: hub.SegmentQueue,
+		RemoveQueue: hub.RemoveWorkflowQueue,
 	})
 	inst, err := installer.New(installer.Options{
 		URL: hub.InstallURL, MCECluster: hub.MCEName, Namespace: hub.AgentNamespace,
@@ -171,6 +174,16 @@ func run(args []string) int {
 		setupLog.Error(err, "Failed to create the installer client")
 		return 1
 	}
+	remover, err := installer.NewRemover(installer.Options{
+		URL: hub.RemoveURL, MCECluster: hub.MCEName, Namespace: hub.AgentNamespace,
+		Timeout: installTimeout(hub.ReconcileTimeout), BearerToken: os.Getenv(envBearerToken),
+		CAFile: os.Getenv(envInstallCA),
+	})
+	if err != nil {
+		setupLog.Error(err, "Failed to create the remove client")
+		return 1
+	}
+	removeRuns := temporalx.NewRemoveRuns(temporalx.Options{Client: tc, CacheTTL: 10 * time.Second})
 
 	reload := make(chan event.GenericEvent, 1)
 	watcher := &config.FileWatcher{
@@ -188,6 +201,15 @@ func run(args []string) int {
 	}
 	if err := r.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to set up the controller")
+		return 1
+	}
+	retirer, err := r.NewRetirer(controller.RetireOptions{Runs: removeRuns, Remover: remover})
+	if err != nil {
+		setupLog.Error(err, "Failed to create the retirer")
+		return 1
+	}
+	if err := retirer.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to set up the retirer")
 		return 1
 	}
 	if err := mgr.Add(watcher); err != nil {
@@ -237,10 +259,18 @@ func logDryRun(logger logr.Logger, c config.Config) {
 	if def {
 		logger.Info("Dry run is ON by default: pools only log \"Would install\" and order nothing",
 			"dryRunGrow", true, "poolsOrderingForReal", differing)
+	} else {
+		logger.Info("Dry run is OFF by default: pools place REAL install orders",
+			"dryRunGrow", false, "poolsInDryRun", differing)
+	}
+	def, differing = c.RemoveDryRunSummary()
+	if def {
+		logger.Info("Removal dry run is ON by default: used servers are labelled but only logged as \"Would remove\"",
+			"dryRunRemove", true, "poolsRemovingForReal", differing)
 		return
 	}
-	logger.Info("Dry run is OFF by default: pools place REAL install orders",
-		"dryRunGrow", false, "poolsInDryRun", differing)
+	logger.Info("Removal dry run is OFF by default: released used servers are REALLY removed from the MCE",
+		"dryRunRemove", false, "poolsInRemovalDryRun", differing)
 }
 
 func reloadHandler(

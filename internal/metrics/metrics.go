@@ -31,7 +31,18 @@ type Metrics struct {
 	reconcile, sweep prometheus.Histogram
 	valid            prometheus.Gauge
 	stuckAfter       prometheus.Gauge
+	retiring         *prometheus.GaugeVec
+	oldestRetiring   prometheus.Gauge
+	labelled         prometheus.Counter
+	labelErrors      prometheus.Counter
+	removals         *prometheus.CounterVec
 }
+
+// RetireStates are the state values of herzi_retiring_agents.
+var RetireStates = []string{pipeline.RetireBlocked, pipeline.RetirePaused, pipeline.RetireDryRun, pipeline.RetireWaiting, pipeline.RetireRemoving}
+
+// RemovalResults are the result values of herzi_removals_total.
+var RemovalResults = []string{"started", "already_running", "ambiguous", "rejected", "dry_run"}
 
 // New reuses duplicate collectors; callers must check RegistrationError before use.
 const labelPool = "pool"
@@ -58,6 +69,7 @@ func New(reg prometheus.Registerer) *Metrics {
 		"claimable",
 		"settling",
 		"stuck_agents",
+		"retiring",
 		"open_runs",
 		"target",
 		"need",
@@ -115,6 +127,18 @@ func New(reg prometheus.Registerer) *Metrics {
 		Help: "Last configuration accepted"})).(prometheus.Gauge)
 	m.stuckAfter = register(prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "herzi_stuck_after_seconds", Help: "Configured open run alert threshold"})).(prometheus.Gauge)
+	m.retiring = register(prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "herzi_retiring_agents",
+		Help: "Released ever-installed Agents not yet removed, by state (blocked, paused, dry_run, waiting, removing)"},
+		[]string{"state"})).(*prometheus.GaugeVec)
+	m.oldestRetiring = register(prometheus.NewGauge(prometheus.GaugeOpts{Name: "herzi_oldest_retiring_seconds",
+		Help: "Age of the oldest retiring Agent that is waiting or being removed; 0 when none"})).(prometheus.Gauge)
+	m.labelled = register(prometheus.NewCounter(prometheus.CounterOpts{Name: "herzi_agents_labelled_total",
+		Help: "Bound Agents labelled redbull.io/ever-installed"})).(prometheus.Counter)
+	m.labelErrors = register(prometheus.NewCounter(prometheus.CounterOpts{Name: "herzi_label_errors_total",
+		Help: "Failed ever-installed label patches"})).(prometheus.Counter)
+	m.removals = register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "herzi_removals_total",
+		Help: "remove-server-from-mce requests by result (started, already_running, ambiguous, rejected, dry_run)"},
+		[]string{"result"})).(*prometheus.CounterVec)
 	return m
 }
 func flag(b bool) float64 {
@@ -139,6 +163,7 @@ func (m *Metrics) ObservePool(f pipeline.PoolFacts,
 		"claimable":    float64(f.Claimable),
 		"settling":     float64(f.Settling),
 		"stuck_agents": float64(f.StuckAgents),
+		"retiring":     float64(f.Retiring),
 		"open_runs":    float64(len(f.Open)),
 		"target":       float64(target),
 		"need":         float64(need)}
@@ -197,6 +222,25 @@ func (m *Metrics) ObservePollers(p pipeline.PollerStatus) {
 	m.pollers.WithLabelValues("activity").Set(float64(p.Activity))
 	m.pollers.WithLabelValues("workflow").Set(float64(p.Workflow))
 	m.pollers.WithLabelValues("segment").Set(float64(p.Segment))
+	m.pollers.WithLabelValues("remove").Set(float64(p.Remove))
+}
+
+// RetiringAgents sets every state, so a state that empties drops to zero.
+func (m *Metrics) RetiringAgents(counts map[string]int, oldest time.Duration) {
+	for _, state := range RetireStates {
+		m.retiring.WithLabelValues(state).Set(float64(counts[state]))
+	}
+	m.oldestRetiring.Set(oldest.Seconds())
+}
+func (m *Metrics) Labelled()   { m.labelled.Inc() }
+func (m *Metrics) LabelError() { m.labelErrors.Inc() }
+
+// Removal counts one remove-server-from-mce decision; result is bounded to RemovalResults.
+func (m *Metrics) Removal(result string) {
+	if !slices.Contains(RemovalResults, result) {
+		result = classOther
+	}
+	m.removals.WithLabelValues(result).Inc()
 }
 func (m *Metrics) Order(pool string, mode pipeline.Mode, result string, started int) {
 	label := "full"

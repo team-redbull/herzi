@@ -7,3 +7,6 @@ These are implementation decisions moved out of the code.
 - Sweeper.Sweep: Wait for every RPC worker before returning so no detached worker outlives the sweep; discard canceled observations so they cannot poison the next reconcile.
 - Sweeper.failureType: History errors leave the failure type unknown and are retried after the pool TTL rather than cached permanently, allowing recovery without assuming success.
 - Queues.Pollers: Use plain DescribeTaskQueue without task reachability; preserve successful counts from other queues when one read fails so diagnostics retain available information.
+- describeExecution: The sweeper and RemoveRuns share one Describe-by-id helper; Describe without a run id returns the latest run and is strongly consistent, unlike a List.
+- RemoveRuns: Results are cached per server id for CacheTTL and calls share an in-flight Describe, so the open-removal count over every retiring Agent stays cheap; errors and canceled calls are never cached. Invalidate after each removal request makes the next count see the new run.
+- Queues.RemoveQueue: Empty skips the remove workflow queue, so a QueueChecker without it reports Remove as 0 and removal stays blocked.

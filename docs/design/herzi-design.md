@@ -1,10 +1,13 @@
 # Inventory Controller — v2
 
-**Scope:** permanently add-only. The controller only adds servers; capacity is never reclaimed.
+**Scope:** capacity is add-only; used servers are retired. The pool logic never removes capacity because of a surplus.
+The one removal is retiring: an Agent that was ever bound to a tenant cluster is labelled `redbull.io/ever-installed` and,
+once released, removed from the MCE through the workflows `remove-server-from-mce` route (cases 16 and 17, "The retirer").
 VM creation and install-route idempotency remain backlog items.
 **Design source:** [`inventory-controller-original.md`](inventory-controller-original.md), superseded historical input.
 **Reviews applied:** two Codex reviews, a logic simulation review and a feasibility review.
-Independent round-2 safety fixes and the owner-approved add-only change are incorporated below.
+Independent round-2 safety fixes, the owner-approved add-only change and the owner-approved retirement of used servers
+([plan](../review/retire-used-servers-plan.md)) are incorporated below.
 
 | Part | What it is |
 |---|---|
@@ -33,7 +36,7 @@ need   = target - (assigned + claimable + settling + open)
 
 With valid observations and an unblocked pool, positive need enters Full/Probe growth.
 At or above target, the controller holds (`HoldAtOrAboveTarget = "at or above target"`),
-before considering failures or probes. Capacity is never reclaimed: lowering demand or
+before considering failures or probes. Capacity is never reclaimed because of a surplus: lowering demand or
 the buffer only stops additions. Spare capacity can persist indefinitely.
 
 With defaults `highPct: 10` and `minFree: 2`:
@@ -58,8 +61,8 @@ machines (target 23); now it has two (target 22), the floor. With integer half-u
 rounding, the floor decides the buffer through demand 24; the percentage takes over
 at demand 25: `(10*25+50)/100 = 3`. Set `highPct: 15` explicitly to retain the former
 target behavior. To raise the buffer, set an explicit `highPct: 30` or increase
-`minFree`. Because the controller never removes servers, a larger buffer adds
-permanent capacity. Capacity is never reclaimed.
+`minFree`. Because the controller never removes spare servers, a larger buffer adds
+permanent capacity.
 
 Defaults and merged pools cap `highPct` at 1000 and `minFree` at 100000 (both
 must be non-negative). Invalid defaults reject the document; invalid merged pool
@@ -76,6 +79,7 @@ calculation holds with `HoldTargetOutOfRange = "target out of range"` and cannot
 | claimable | Agents free to be claimed right now: unbound, approved, connected, not deleting |
 | settling | Agents that are free but not claimable *yet*: rebooting after a release, just registered, or carrying a leftover label. Counted for up to an hour from their last state change, then they stop counting and raise an alert |
 | open runs | Every Running install slot, including brief overlap after its Agent arrives |
+| *retiring (not supply)* | Unbound Agents carrying the `redbull.io/ever-installed` key: they were installed on a tenant cluster and are on their way off the MCE. Never counted, never stuck |
 
 ## Worked cases
 
@@ -107,16 +111,16 @@ An empty pool, demand 0 → 50. Target 55. The controller never has more than 15
 It never re-orders what is already in flight: open runs are subtracted every time.
 
 ### 4. A tenant scales down, then up again
-Demand 20 → 4. 16 Agents are released. They reboot into the discovery image for ~12 minutes and are
-wiped before they register as free.
+Demand 20 → 4. 16 Agents are released. They were bound to the tenant cluster, so each carries
+`redbull.io/ever-installed`: they are retiring, not settling, and they never return to the pool.
 
 ```
-10:00  assigned 4, claimable 2, settling 16 (the rebooting ones) → supply 22
-10:10  tenant scales to 12 → target 14, supply 22 → need -8 → no order
-10:21  the 16 return as claimable
+10:00  assigned 4, claimable 2, retiring 16 (not supply) → supply 6; the retirer asks to remove the 16 (10 at a time)
+10:10  tenant scales to 12 → target 14, supply 6 → need 8 → order 8 fresh machines
 ```
 
-The rebooting machines count, so the controller does not order machines nobody needs. Capacity remains available for future demand.
+Released machines are never reused; a scale-up after a scale-down costs fresh installs. Agents released before the
+label existed carry no label and still count as settling, then claimable.
 
 ### 5. The inventory has no free machines
 The pool is short by 6 and server-scan has nothing for it.
@@ -193,17 +197,40 @@ It never blocks other pools.
 ### 14. An ignored or paused pool
 Every InfraEnv in `agentNamespace` is managed. An InfraEnv is ignored when it carries the ignore label
 (`ignoreLabel`, default `herzi.redbull.io/ignore`, any value), or when `pools.<name>.exclude` is true.
-An ignored InfraEnv is not read beyond its own object: no sweep, no orders, no metrics, no requeue, and
-its NodePools and Agents are not counted anywhere. Removing the label or the exclude starts managing it on
-the next event or config reload. A paused pool (annotation or config flag) is still read and reported,
-but never orders.
+An ignored InfraEnv is left out of supply and growth: no sweep, no orders, no pool metrics, no requeue, and
+its NodePools and Agents are not counted. The retirer still labels and removes its used servers. Removing the
+label or the exclude starts managing it on the next event or config reload. A paused pool (annotation or config
+flag) is still read and reported, but never orders and never removes; its bound Agents are still labelled.
 
 TimedOut runs have no failure type. The sweeper sets `FailType = pipeline.FailUnknown`
 (`"unknown"`) without reading failure history. MergeState and Decide treat this as
 unknown failure evidence, preventing Full spending and allowing only scheduled probes.
 
 ### 15. Dry run
-With `dryRunGrow: true` it logs "Would install" with the exact request instead of sending it.
+With `dryRunGrow: true` it logs "Would install" with the exact request instead of sending it. With
+`dryRunRemove: true` (the default) the retirer labels and checks every gate, then logs "Would remove" instead of
+calling remove-server-from-mce.
+
+### 16. A used server is released
+A NodePool scales down; CAPI deletes the AgentMachine and unbinds its Agent.
+
+```
+09:00  CAPI binds the Agent → seconds later the retirer labels it redbull.io/ever-installed
+       (CAPI never re-checks the selector after the pick, so the install is untouched)
+15:00  scale-down: clusterDeploymentName and agentMachineRef are cleared → the Agent is retiring, not supply
+15:00  gates hold → POST remove-server-from-mce {server_name: <bmh label>} → run Running
+15:03  the run powers the host off and deletes its BMH, NMStateConfig and Agent → the retirer forgets it
+```
+
+Every NodePool carries `matchExpressions: [{key: redbull.io/ever-installed, operator: DoesNotExist}]`, so no NodePool
+can claim the labelled Agent while it waits. A run that fails or completes with nothing found is retried after
+`removeRetryAfter`. The server leaves this MCE only; server-scan may later hand it to an install as a fresh Agent.
+
+### 17. A NodePool lacks the exclusion
+A released labelled Agent still matches some Agent-platform NodePool's selector (for example an old NodePool without
+the expression, or one with no selector at all). CAPI could claim it, so removal waits (`blocked`, reason "unguarded
+nodepool", the NodePool named in the log) and `HerziRetireBlocked` fires after 30 minutes. Adding the expression or
+deleting the NodePool re-evaluates every retiring Agent at once.
 
 ---
 
@@ -378,7 +405,8 @@ func Attribute(raw RawSnapshot, cfg Config) map[PoolKey]PoolFacts {
         case isPaused(np):                                        warn(np, "paused")        // pausedUntil: "true" or RFC3339
         case no IELabel in selector:                              warn(np, "not tied to an InfraEnv")   // hub-scoped
         case ie not known:                                        warn(np, "unknown InfraEnv")          // hub-scoped
-        case len(MatchLabels) != 1 || len(MatchExpressions) > 0:  problem(ie, "selector must be only the InfraEnv label")
+        case len(MatchLabels) != 1 || MatchExpressions not in {[], [ever-installed DoesNotExist]}:
+                                                                  problem(ie, "selector must be only the InfraEnv label, optionally with the ever-installed exclusion")
         case np.Replicas == nil:                                  problem(ie, "no replicas (autoscaling?)")
         default:                                                  facts[ie].Demand += *np.Replicas
         }
@@ -389,6 +417,7 @@ func Attribute(raw RawSnapshot, cfg Config) map[PoolKey]PoolFacts {
         switch {
         case a.Spec.ClusterDeploymentName != nil:   facts[ie].Assigned++
         case a.Deleting:                            // ignore
+        case has(a.Labels, "redbull.io/ever-installed"): facts[ie].Retiring++   // never supply; the retirer removes it
         case isClaimable(a):                        facts[ie].Claimable++
         case sinceLastStateChange(a) < cfg.ForPool(ie).SettlingMax:  facts[ie].Settling++   // includes a stale agentMachineRef label
         default:                                    facts[ie].StuckAgents++
@@ -518,6 +547,41 @@ Ambiguous/rejected outcomes keep the marker and extend it from outcome time thro
 Every attempted POST invalidates the cached sweep. A later attempt requires `ObservedAt` strictly newer
 than the previous attempt, on both the initial decision and the uncached Kubernetes recheck.
 
+## The retirer
+
+A second controller in the same manager, keyed by Agent (`For(Agent)` in `agentNamespace`; NodePool and InfraEnv
+changes enqueue every retiring Agent). It covers every Agent in the namespace, including ignored, excluded and stray ones.
+The decision is pure (`pipeline.Retirement`, `pipeline.DecideRemove`); the controller only gathers and executes.
+
+```go
+switch Retirement(agent) {
+case RetireLabel:      // bound, not deleting, no label: merge-patch the label (bounded detached context)
+                       // regardless of pause, ignore, exclude or dry run: a missed label cannot be repaired
+case RetireNothing:    // unlabelled, bound or deleting
+case RetireCandidate:  // labelled, unbound, not deleting
+    d := DecideRemove(observe(agent))   // fail closed, first failing gate wins:
+    //   agentMachineRef present            blocked  "held by an AgentMachine"
+    //   no agent-install.openshift.io/bmh  blocked  "no bmh label"     (never guess a server name)
+    //   InfraEnv or NodePools unreadable   blocked
+    //   an Agent-platform NodePool selector still matches the Agent (CAPI could claim it): blocked "unguarded nodepool"
+    //   no pollers on remove workflow, activity or segment queue: blocked "no workers"
+    //   pool paused (config or annotation) paused
+    //   Describe(remove-server-from-mce-<server>) failed: waiting; Running (ours or not): removing
+    //   closed less than removeRetryAfter ago: waiting "retry backoff"
+    //   Running remove runs >= maxOpenRemovals: waiting "removal cap"
+    if d.Server != "" {
+        // under one hub-wide lock: recount open runs, re-read the Agent UNCACHED, decide again;
+        // only an identical answer proceeds
+        if dryRunRemove { log "Would remove" } else { POST; Invalidate(server) }
+    }
+}
+```
+
+No pre-POST marker is needed: the workflow id is fixed per server, so a duplicate is a 409 and a re-run after completion
+finds nothing. 202 is started, 409 already running, another 4xx rejected (blocked for `removeRetryAfter`), anything else
+ambiguous (the next Describe decides). The workflow itself refuses a bound Agent, but not one still held by an
+AgentMachine; herzi checks that. `herzi_retiring_agents{state}` and `herzi_oldest_retiring_seconds` report the result.
+
 ## Config
 
 Settings are of two kinds. **Hub settings** describe this hub or protect against a problem of this hub, and cannot differ per pool. **Pool settings**
@@ -533,7 +597,11 @@ installURL: https://<workflows-api>/workflows/server-lifecycle/add-server-to-mce
 maxSlots: 100                       # must equal the route's slot range
 ambiguousWait: 5m                   # block after an unclear POST: protects against an API problem on this hub
 stuckAfter: 2h                      # an open run older than this => alert only
-ignoreLabel: herzi.redbull.io/ignore # an InfraEnv with this label key (any value) is ignored, and so are its NodePools; live reload
+ignoreLabel: herzi.redbull.io/ignore # an InfraEnv with this label key (any value) is left out of supply and growth, and so are its NodePools; live reload
+removeURL: ""                       # empty: installURL with its last segment replaced by remove-server-from-mce; startup-bound
+removeWorkflowQueue: remove-server-from-mce-workflow
+maxOpenRemovals: 10                 # hub-wide cap on running remove runs; live reload
+removeRetryAfter: 30m               # wait after a closed remove run before asking again; >= interval; live reload
 
 # ---- pool settings: defaults, overridable per pool ----
 defaults:
@@ -545,6 +613,7 @@ defaults:
   failureMemory: 6h
   settlingMax: 60m                  # matches the install workflow's one-hour agent wait
   dryRunGrow: true                  # rollout safeguard: log "Would install" instead of ordering
+  dryRunRemove: true                # rollout safeguard: log "Would remove" instead of removing used servers
   paused: false
 
 # ---- pools: OVERRIDES ONLY, keyed by InfraEnv name; every other InfraEnv uses the defaults ----
@@ -610,7 +679,10 @@ The decision uses signed need; `herzi_pool_need` reports `max(0, need)`.
 | After an unclear POST, no order for `ambiguousWait`, and the block survives a restart | blind retry |
 | Probe: Grow is exactly 1, at most every `probeInterval`, while capacity failures have no proof after them | storms, and never stopping |
 | Proof must have STARTED after the last capacity failure | doomed bursts after a partial order |
-| Free machines (claimable, settling) are never dropped from supply while rebooting | over-order after a scale-down |
+| Free machines (claimable, settling) are never dropped from supply while rebooting, unless they carry `redbull.io/ever-installed` | over-order after a scale-down |
+| A bound Agent is labelled whatever pause, ignore or dry run say; a labelled Agent is never supply | a used server returning to the pool |
+| Removal needs a bmh server name, no `agentMachineRef`, no NodePool selector matching the Agent, an uncached re-read with the same answer | removing a server in use, or the wrong server |
+| At most `maxOpenRemovals` remove runs open; one request per server while a run is open | removal storms after a cluster deletion |
 | An Agent with a stale `agentMachineRef` is settling, not invisible | runaway ordering |
 | At/above target always Holds, regardless of supply composition or failure evidence | no unnecessary additions or probes |
 | Zero pollers on any of the three queues, or a poller error, blocks the pool | runs that never start |
@@ -754,6 +826,11 @@ with no other supply needs 1. More supply never increases the order count.
 - `candidate_count` is sized per hub, so two hubs filling the same InfraEnv name at once see more `reserved` skips.
 - Nothing in `workflows` creates VMs yet: VM pools run dry when server-scan has none free.
 - Pollers are detected ~5 min after a worker dies.
+- A bind and a release that both happen while herzi is down are never labelled; that server returns to the pool.
+- Agents released before the retirer was deployed carry no label and stay in the pool.
+- `upgradeType: Replace` NodePools retire their whole fleet on every upgrade, which then needs as many fresh installs.
+- The open-removal cap undercounts remove runs in their last phases, after the Agent is already deleted.
+- server-scan may hand a removed server to a later install on this or another MCE, as a fresh unlabelled Agent.
 
 ## F. To verify on a real hub
 - The exact Agent label key and the Agent state strings.
@@ -781,6 +858,9 @@ with no other supply needs 1. More supply never increases the order count.
 | No worker | zero pollers on any of the three queues => do not order |
 | Stuck run | compare open age to unlabeled herzi_stuck_after_seconds from startup stuckAfter (default 2h); restart to change |
 | Capacity policy | add-only; at or above target Holds; lowering demand or buffer only stops additions |
+| Used servers | retired: labelled `redbull.io/ever-installed` on bind, removed from the MCE once released; off this MCE only, server-scan may reuse the hardware |
+| Retirement scope | every Agent in `agentNamespace`; ignore and exclude govern supply and growth only; pause stops removal, not labelling |
+| Retirement guard | every NodePool carries `redbull.io/ever-installed DoesNotExist`; a NodePool selector that still matches blocks removal |
 
 ## H. Backlog
 - **Idempotency key (or "ensure N open") on the install route:** removes the residual race.

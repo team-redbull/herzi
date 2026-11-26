@@ -72,6 +72,7 @@ func clonePools(pools map[string]PoolOverride) map[string]PoolOverride {
 		p.FailureMemory = clonePointer(p.FailureMemory)
 		p.SettlingMax = clonePointer(p.SettlingMax)
 		p.DryRunGrow = clonePointer(p.DryRunGrow)
+		p.DryRunRemove = clonePointer(p.DryRunRemove)
 		p.Paused = clonePointer(p.Paused)
 		p.Exclude = clonePointer(p.Exclude)
 		out[name] = p

@@ -1,7 +1,9 @@
-> **Change specification, not yet implemented.** Written on 2026-11-19 against herzi `0ef4d2a` and workflows
-> `5856f96`. The owner approved the decisions in section 1. Until this is implemented,
-> [herzi-design.md](../design/herzi-design.md) still describes the add-only contract.
-> Implementing this spec includes updating that document (section 2).
+> **Change specification / historical planning record.** Written on 2026-11-19 against herzi `0ef4d2a` and workflows
+> `5856f96`; the owner approved the decisions in section 1. Implemented on branch `feat/retire-used-servers`; the
+> [design](../design/herzi-design.md) and [operating guide](../ops/operating.md) now describe the contract. The
+> implementation differs from this plan in small ways: `herzi_retiring_agents` also has `paused` and `dry_run`
+> states, the slow alert is `HerziRetirementSlow` on `herzi_oldest_retiring_seconds`, and the retirer has no
+> config-reload watch (retiring Agents requeue every `interval`).
 
 # Plan: retire used servers
 

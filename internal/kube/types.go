@@ -4,6 +4,8 @@ package kube
 import (
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -12,6 +14,11 @@ const (
 	LabelInfraEnv = "infraenvs.agent-install.openshift.io"
 	// LabelAgentMachineRef marks an Agent held by an AgentMachine.
 	LabelAgentMachineRef = "agentMachineRef"
+	// LabelEverInstalled marks an Agent that was bound to a tenant cluster; the key alone retires it.
+	LabelEverInstalled = "redbull.io/ever-installed"
+	EverInstalledValue = "true"
+	// LabelBMH holds the lowercased server-scan name, the only server identity sent to remove-server-from-mce.
+	LabelBMH = "agent-install.openshift.io/bmh"
 
 	StateKnownUnbound = "known-unbound"
 
@@ -38,9 +45,30 @@ type InfraEnv struct {
 	EarlyBound  bool
 }
 
+type Requirement struct {
+	Key      string
+	Operator string
+	Values   []string
+}
+
 type Selector struct {
-	MatchLabels    map[string]string
-	HasExpressions bool
+	MatchLabels map[string]string
+	Expressions []Requirement
+}
+
+// IsEverInstalledExclusion is the one expression a NodePool may add to its InfraEnv label.
+func (r Requirement) IsEverInstalledExclusion() bool {
+	return r.Key == LabelEverInstalled && r.Operator == string(metav1.LabelSelectorOpDoesNotExist) && len(r.Values) == 0
+}
+
+// LabelSelector evaluates the selector as CAPI does: an empty selector matches every Agent.
+func (s Selector) LabelSelector() (labels.Selector, error) {
+	ls := &metav1.LabelSelector{MatchLabels: s.MatchLabels}
+	for _, r := range s.Expressions {
+		ls.MatchExpressions = append(ls.MatchExpressions, metav1.LabelSelectorRequirement{
+			Key: r.Key, Operator: metav1.LabelSelectorOperator(r.Operator), Values: r.Values})
+	}
+	return metav1.LabelSelectorAsSelector(ls)
 }
 
 type NodePool struct {
@@ -68,3 +96,10 @@ type Agent struct {
 }
 
 func (a Agent) InfraEnvName() string { return a.Labels[LabelInfraEnv] }
+
+// EverInstalled tests the key, as a NodePool's DoesNotExist exclusion does.
+func (a Agent) EverInstalled() bool { _, ok := a.Labels[LabelEverInstalled]; return ok }
+
+func (a Agent) HeldByMachine() bool { _, ok := a.Labels[LabelAgentMachineRef]; return ok }
+
+func (a Agent) ServerName() string { return a.Labels[LabelBMH] }
